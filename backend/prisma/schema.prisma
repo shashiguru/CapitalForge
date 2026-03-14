@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id         String      @id @default(uuid())
+  email      String      @unique
+  password   String
+  name       String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  portfolios Portfolio[]
+
+  @@map("users")
+}
+
+model Portfolio {
+  id                      String             @id @default(uuid())
+  userId                  String
+  name                    String
+  description             String?
+  totalCapital            Decimal            @default(0) @db.Decimal(18, 2)
+  strategyReferenceBudget Decimal?           @db.Decimal(18, 2) // yearly budget the strategy was designed for; when set, amounts scale by totalCapital/this
+  budgetYearStart         DateTime?          @db.Date    // start of budget period (e.g. Jan 1)
+  budgetYearEnd           DateTime?          @db.Date    // end of budget period (e.g. Dec 31)
+  currency                String             @default("USD")
+  isActive                Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  allocations       Allocation[]
+  coreStocks        CoreStock[]
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategySnapshots StrategySnapshot[]
+  strategyRules     StrategyRule[]
+  transactions      Transaction[]
+  weeklyBudgets     WeeklyBudget[]
+  budgetPresets     BudgetPreset[]
+
+  @@index([userId])
+  @@map("portfolios")
+}
+
+model BudgetPreset {
+  id                      String    @id @default(uuid())
+  portfolioId             String
+  name                    String
+  totalCapital            Decimal   @db.Decimal(18, 2)
+  strategyReferenceBudget Decimal? @db.Decimal(18, 2)
+  budgetYearStart         DateTime? @db.Date
+  budgetYearEnd           DateTime? @db.Date
+  createdAt               DateTime @default(now())
+  portfolio               Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
+  @@map("budget_presets")
+}
+
+model CoreStock {
+  id          String    @id @default(uuid())
+  portfolioId String
+  symbol      String
+  displayName String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, symbol])
+  @@index([portfolioId])
+  @@map("core_stocks")
+}
+
+model StrategyRule {
+  id                String    @id @default(uuid())
+  portfolioId       String
+  symbol            String
+  fiftyTwoWeekHigh  Decimal   @db.Decimal(18, 4)
+  dipPercent        Int       // 10, 15, 20, 30, 31 (31 = more than 30%)
+  thresholdPrice    Decimal   @db.Decimal(18, 4)
+  buyQuantity       Int       // shares to buy at this dip level
+  weeklyDipQuantity Int?      // shares for weekly dip (null = NA)
+  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, symbol, dipPercent])
+  @@index([portfolioId])
+  @@index([portfolioId, symbol])
+  @@map("strategy_rules")
+}
+
+model Allocation {
+  id                String    @id @default(uuid())
+  portfolioId       String
+  symbol            String
+  companyName       String?
+  targetPercentage  Decimal   @db.Decimal(5, 2)
+  allocationUSD     Decimal   @default(0) @db.Decimal(18, 2)
+  coreBucketUSD     Decimal   @default(0) @db.Decimal(18, 2)
+  dipBucketUSD      Decimal   @default(0) @db.Decimal(18, 2)
+  crashBucketUSD    Decimal   @default(0) @db.Decimal(18, 2)
+  monthlyDCA        Decimal   @default(0) @db.Decimal(18, 2)
+  weeklyDCA         Decimal   @default(0) @db.Decimal(18, 2)
+  coreUsedUSD       Decimal   @default(0) @db.Decimal(18, 2)
+  dipUsedUSD        Decimal   @default(0) @db.Decimal(18, 2)
+  crashUsedUSD      Decimal   @default(0) @db.Decimal(18, 2)
+  coreRemainingUSD  Decimal   @default(0) @db.Decimal(18, 2)
+  dipRemainingUSD   Decimal   @default(0) @db.Decimal(18, 2)
+  crashRemainingUSD Decimal   @default(0) @db.Decimal(18, 2)
+  sharesOwned       Decimal   @default(0) @db.Decimal(18, 6)
+  avgCostBasis      Decimal   @default(0) @db.Decimal(18, 4)
+  investedValue     Decimal   @default(0) @db.Decimal(18, 2)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, symbol])
+  @@index([portfolioId])
+  @@index([symbol])
+  @@map("allocations")
+}
+
+model PriceDaily {
+  id               String   @id @default(uuid())
+  symbol           String
+  date             DateTime @db.Date
+  open             Decimal? @db.Decimal(18, 4)
+  high             Decimal? @db.Decimal(18, 4)
+  low              Decimal? @db.Decimal(18, 4)
+  close            Decimal  @db.Decimal(18, 4)
+  volume           BigInt?
+  fiftyTwoWeekHigh Decimal? @db.Decimal(18, 4)
+  fiftyTwoWeekLow  Decimal? @db.Decimal(18, 4)
+  createdAt        DateTime @default(now())
+
+  @@unique([symbol, date])
+  @@index([symbol, date])
+  @@index([symbol])
+  @@map("prices_daily")
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  portfolioId String
+  symbol      String
+  type        TransactionType
+  price       Decimal         @db.Decimal(18, 4)
+  quantity    Decimal         @db.Decimal(18, 6)
+  total       Decimal         @db.Decimal(18, 2)
+  fees        Decimal         @default(0) @db.Decimal(18, 2)
+  notes       String?
+  date        DateTime        @db.Date
+  executedAt  DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  portfolio   Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
+  @@index([symbol])
+  @@index([date])
+  @@index([portfolioId, symbol])
+  @@map("transactions")
+}
+
+model WeeklyBudget {
+  id              String    @id @default(uuid())
+  portfolioId     String
+  weekStartDate   DateTime  @db.Date
+  plannedAmount   Decimal   @db.Decimal(18, 2)
+  usedAmount      Decimal   @default(0) @db.Decimal(18, 2)
+  remainingAmount Decimal   @db.Decimal(18, 2)
+  carryForward    Boolean   @default(false)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, weekStartDate])
+  @@index([portfolioId])
+  @@index([weekStartDate])
+  @@map("weekly_budgets")
+}
+
+model StrategySnapshot {
+  id          String    @id @default(uuid())
+  portfolioId String
+  asOfDate    DateTime  @db.Date
+  totalBudget Decimal   @db.Decimal(18, 2)
+  status      String    @default("PENDING")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  buyPlans    BuyPlan[]
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
+  @@index([asOfDate])
+  @@map("strategy_snapshots")
+}
+
+model BuyPlan {
+  id                String           @id @default(uuid())
+  snapshotId        String
+  symbol            String
+  currentPrice      Decimal          @db.Decimal(18, 4)
+  fiftyTwoWeekHigh  Decimal          @db.Decimal(18, 4)
+  dipPercentage     Decimal          @db.Decimal(5, 2)
+  dipLevelTriggered DipLevel
+  suggestedPrice    Decimal          @db.Decimal(18, 4)
+  suggestedQuantity Decimal          @db.Decimal(18, 6)
+  capitalRequired   Decimal          @db.Decimal(18, 2)
+  bucketUsed        BucketType
+  reason            String
+  priority          Int              @default(0)
+  isApproved        Boolean          @default(false)
+  isExecuted        Boolean          @default(false)
+  executedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  snapshot          StrategySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId])
+  @@index([symbol])
+  @@map("buy_plans")
+}
+
+model GlobalConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("global_config")
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DIVIDEND
+  FEE
+}
+
+enum DipLevel {
+  NORMAL_DCA
+  LIGHT_DIP
+  MODERATE_DIP
+  DIP_BUCKET
+  CRASH_BUCKET
+}
+
+enum BucketType {
+  CORE
+  DIP
+  CRASH
+}

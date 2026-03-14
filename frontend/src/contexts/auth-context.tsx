@@ -1,0 +1,87 @@
+'use client';
+
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { authApi } from '@/lib/api';
+import type { User as AppUser, LoginCredentials, RegisterCredentials } from '@/lib/types';
+
+interface AuthContextType {
+  user: AppUser | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (credentials: LoginCredentials) => Promise<boolean>;
+  register: (credentials: RegisterCredentials) => Promise<boolean>;
+  logout: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // JWT validation disabled - fetch default user (first user in DB)
+    const initAuth = async () => {
+      try {
+        const profile = await authApi.getProfile();
+        setUser(profile);
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initAuth();
+  }, []);
+
+  const login = async (credentials: LoginCredentials): Promise<boolean> => {
+    try {
+      const response = await authApi.login(credentials);
+      localStorage.setItem('token', response.accessToken);
+      setUser(response.user);
+      return true;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Login failed');
+    }
+  };
+
+  const register = async (credentials: RegisterCredentials): Promise<boolean> => {
+    try {
+      const response = await authApi.register(credentials);
+      localStorage.setItem('token', response.accessToken);
+      setUser(response.user);
+      return true;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Registration failed');
+    }
+  };
+
+  const logout = async () => {
+    localStorage.removeItem('token');
+    setUser(null);
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        isAuthenticated: !!user,
+        login,
+        register,
+        logout,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
