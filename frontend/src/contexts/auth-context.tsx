@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import type { User as AppUser, LoginCredentials, RegisterCredentials } from '@/lib/types';
 
@@ -19,15 +20,26 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
-    // JWT validation disabled - fetch default user (first user in DB)
     const initAuth = async () => {
       try {
+        // Check if token exists in localStorage
+        const token = localStorage.getItem('token');
+        
+        if (!token) {
+          setIsLoading(false);
+          return;
+        }
+
+        // Try to validate token by fetching profile
         const profile = await authApi.getProfile();
         setUser(profile);
       } catch (error) {
-        console.error('Error fetching profile:', error);
+        // Token is invalid or expired - clear it
+        localStorage.removeItem('token');
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
@@ -61,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     localStorage.removeItem('token');
     setUser(null);
+    router.push('/login');
   };
 
   const updateProfile = async (dto: { name?: string; currentPassword?: string; newPassword?: string }) => {
