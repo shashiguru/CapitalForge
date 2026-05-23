@@ -3,14 +3,17 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Copy Prisma schema first (needed for postinstall)
+COPY prisma ./prisma
 COPY package*.json ./
+
+# Install dependencies (this triggers postinstall -> prisma generate)
 RUN npm ci
 
-COPY prisma ./prisma
 COPY tsconfig*.json ./
 COPY src ./src
 
-# Build the application (Prisma client will be generated here)
+# Build the application
 RUN npm run build
 
 # Stage 2: Production
@@ -22,10 +25,14 @@ WORKDIR /app
 RUN apk add --no-cache dumb-init
 
 COPY package*.json ./
+
+# Copy Prisma schema before npm ci (for postinstall)
+COPY prisma ./prisma
+
+# Install production dependencies (this triggers postinstall -> prisma generate)
 RUN npm ci --omit=dev
 
-# Copy Prisma schema and generated client
-COPY prisma ./prisma
+# Copy compiled application
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
