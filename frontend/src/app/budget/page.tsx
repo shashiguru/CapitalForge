@@ -737,7 +737,7 @@ export default function BudgetPage() {
               <Label className="text-xs">Budget ($)</Label>
               <Input className="h-9 text-sm" type="number" min={0} step={500} placeholder="23639" value={addAmount} onChange={(e) => setAddAmount(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Start</Label>
                 <Input className="h-9 text-sm" type="date" value={addStart} onChange={(e) => setAddStart(e.target.value)} />
@@ -772,7 +772,7 @@ export default function BudgetPage() {
               <Label className="text-xs">Budget ($)</Label>
               <Input className="h-9 text-sm" type="number" min={0} step={500} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Start</Label>
                 <Input className="h-9 text-sm" type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} />
@@ -804,7 +804,7 @@ export default function BudgetPage() {
               <Label className="text-xs">Budget ($)</Label>
               <Input className="h-9 text-sm" type="number" min={0} step={500} value={activeAmount} onChange={(e) => setActiveAmount(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Start</Label>
                 <Input className="h-9 text-sm" type="date" value={activeStart} onChange={(e) => setActiveStart(e.target.value)} />

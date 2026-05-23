@@ -192,7 +192,7 @@ export default function TransactionsPage() {
 
   const TransactionForm = ({ isEdit }: { isEdit: boolean }) => (
     <div className="grid gap-4 py-2">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">Symbol</Label>
           <Select value={symbol} onValueChange={setSymbol}>
@@ -224,7 +224,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">Price ($)</Label>
           <Input className="h-9 text-sm" type="number" step="any" min="0.0001" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="150.00" required />
@@ -251,7 +251,7 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">Fees (optional)</Label>
           <Input className="h-9 text-sm" type="number" step="any" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" />
