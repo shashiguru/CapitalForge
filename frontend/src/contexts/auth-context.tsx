@@ -11,6 +11,7 @@ interface AuthContextType {
   login: (credentials: LoginCredentials) => Promise<boolean>;
   register: (credentials: RegisterCredentials) => Promise<boolean>;
   logout: () => Promise<void>;
+  updateProfile: (dto: { name?: string; currentPassword?: string; newPassword?: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await authApi.login(credentials);
       localStorage.setItem('token', response.accessToken);
-      setUser(response.user);
+      setUser(response.user as AppUser);
       return true;
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Login failed');
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await authApi.register(credentials);
       localStorage.setItem('token', response.accessToken);
-      setUser(response.user);
+      setUser(response.user as AppUser);
       return true;
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Registration failed');
@@ -62,6 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const updateProfile = async (dto: { name?: string; currentPassword?: string; newPassword?: string }) => {
+    const updated = await authApi.updateProfile(dto);
+    setUser(updated);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -71,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
+        updateProfile,
       }}
     >
       {children}

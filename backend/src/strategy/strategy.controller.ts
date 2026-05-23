@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Put,
   Get,
   Body,
   Param,
@@ -16,6 +17,7 @@ import {
   ApproveBuyPlanDto,
   PortfolioStrategyTableDto,
   StoredStrategyRulesDto,
+  UpsertStrategyRuleDto,
 } from './dto/strategy.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -63,6 +65,16 @@ export class StrategyController {
     @CurrentUser('id') userId: string,
   ): Promise<StoredStrategyRulesDto> {
     return this.strategyService.getStrategyRules(portfolioId, userId);
+  }
+
+  @Put('rules')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async upsertStrategyRule(
+    @Param('portfolioId') portfolioId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpsertStrategyRuleDto,
+  ): Promise<void> {
+    return this.strategyService.upsertStrategyRule(portfolioId, userId, dto);
   }
 }
 

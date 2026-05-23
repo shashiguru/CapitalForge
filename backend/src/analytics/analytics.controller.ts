@@ -11,6 +11,7 @@ import {
   BucketUsageDto,
   DipOpportunityDto,
   PerformanceAnalyticsDto,
+  AllocationRebalanceDto,
 } from './dto/analytics.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -50,6 +51,32 @@ export class AnalyticsController {
     return this.analyticsService.getDipOpportunities(portfolioId, userId);
   }
 
+  @Get('weekly-transactions')
+  async getWeeklyTransactions(
+    @Param('portfolioId') portfolioId: string,
+    @CurrentUser('id') userId: string,
+    @Query('weeks') weeks?: string,
+  ) {
+    return this.analyticsService.getWeeklyTransactions(
+      portfolioId,
+      userId,
+      weeks ? parseInt(weeks, 10) : 12,
+    );
+  }
+
+  @Get('timeseries')
+  async getPortfolioTimeseries(
+    @Param('portfolioId') portfolioId: string,
+    @CurrentUser('id') userId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.analyticsService.getPortfolioTimeseries(
+      portfolioId,
+      userId,
+      days ? parseInt(days, 10) : 90,
+    );
+  }
+
   @Get('performance')
   async getPerformanceAnalytics(
     @Param('portfolioId') portfolioId: string,
@@ -61,5 +88,13 @@ export class AnalyticsController {
       userId,
       days ? parseInt(days, 10) : 30,
     );
+  }
+
+  @Get('allocation-rebalance')
+  async getAllocationRebalance(
+    @Param('portfolioId') portfolioId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<AllocationRebalanceDto> {
+    return this.analyticsService.getAllocationRebalance(portfolioId, userId) as Promise<AllocationRebalanceDto>;
   }
 }

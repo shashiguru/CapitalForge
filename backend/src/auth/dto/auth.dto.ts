@@ -38,3 +38,22 @@ export class UserProfileDto {
   name: string | null;
   createdAt: Date;
 }
+
+export class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  currentPassword?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  newPassword?: string;
+}

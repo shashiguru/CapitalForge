@@ -3,7 +3,6 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import {
@@ -16,18 +15,27 @@ import {
 
 @Injectable()
 export class AllocationService {
-  private coreRatio: number;
-  private dipRatio: number;
-  private crashRatio: number;
-
   constructor(
     private prisma: PrismaService,
     private portfolioService: PortfolioService,
-    private configService: ConfigService,
+  ) {}
+
+  /** Compute all derived fields from the portfolio ratios + total capital */
+  private computeAllocationFields(
+    totalCapital: number,
+    targetPercentage: number,
+    coreRatio: number,
+    dipRatio: number,
+    crashRatio: number,
+    dcaWeeksPerYear: number,
   ) {
-    this.coreRatio = this.configService.get<number>('CORE_BUCKET_RATIO', 0.6);
-    this.dipRatio = this.configService.get<number>('DIP_BUCKET_RATIO', 0.4);
-    this.crashRatio = this.configService.get<number>('CRASH_BUCKET_RATIO', 0);
+    const allocationUSD = (totalCapital * targetPercentage) / 100;
+    const coreBucketUSD = allocationUSD * coreRatio;
+    const dipBucketUSD = allocationUSD * dipRatio;
+    const crashBucketUSD = allocationUSD * crashRatio;
+    const monthlyDCA = coreBucketUSD / 12;
+    const weeklyDCA = coreBucketUSD / dcaWeeksPerYear;
+    return { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA };
   }
 
   async create(
@@ -37,14 +45,8 @@ export class AllocationService {
   ): Promise<AllocationResponseDto> {
     await this.portfolioService.validateOwnership(portfolioId, userId);
 
-    // Check if allocation already exists for this symbol
     const existing = await this.prisma.allocation.findUnique({
-      where: {
-        portfolioId_symbol: {
-          portfolioId,
-          symbol: dto.symbol.toUpperCase(),
-        },
-      },
+      where: { portfolioId_symbol: { portfolioId, symbol: dto.symbol.toUpperCase() } },
     });
 
     if (existing) {
@@ -53,29 +55,23 @@ export class AllocationService {
       );
     }
 
-    // Validate total percentage doesn't exceed 100%
     await this.validateTotalPercentage(portfolioId, dto.targetPercentage);
 
-    // Get portfolio total capital for bucket calculation
     const portfolio = await this.prisma.portfolio.findUnique({
       where: { id: portfolioId },
     });
 
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
 
-    const totalCapital = Number(portfolio.totalCapital);
-    const allocationUSD = (totalCapital * dto.targetPercentage) / 100;
-
-    // Calculate bucket amounts (60% Core DCA, 40% Dip buy)
-    const coreBucketUSD = allocationUSD * this.coreRatio;
-    const dipBucketUSD = allocationUSD * this.dipRatio;
-    const crashBucketUSD = allocationUSD * this.crashRatio;
-
-    // Calculate DCA breakdown from Core bucket
-    const monthlyDCA = coreBucketUSD / 12;
-    const weeklyDCA = coreBucketUSD / 48;
+    const { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA } =
+      this.computeAllocationFields(
+        Number(portfolio.totalCapital),
+        dto.targetPercentage,
+        Number(portfolio.coreRatio),
+        Number(portfolio.dipRatio),
+        Number(portfolio.crashRatio),
+        portfolio.dcaWeeksPerYear,
+      );
 
     const allocation = await this.prisma.allocation.create({
       data: {
@@ -83,6 +79,11 @@ export class AllocationService {
         symbol: dto.symbol.toUpperCase(),
         companyName: dto.companyName,
         targetPercentage: dto.targetPercentage,
+        isAggressive: dto.isAggressive ?? false,
+        ...(dto.fiftyTwoWeekHigh !== undefined && {
+          fiftyTwoWeekHigh: dto.fiftyTwoWeekHigh,
+          fiftyTwoWeekHighUpdatedAt: new Date(),
+        }),
         allocationUSD,
         coreBucketUSD,
         dipBucketUSD,
@@ -104,10 +105,7 @@ export class AllocationService {
     return this.mapToResponse(allocation);
   }
 
-  async findAll(
-    portfolioId: string,
-    userId: string,
-  ): Promise<AllocationResponseDto[]> {
+  async findAll(portfolioId: string, userId: string): Promise<AllocationResponseDto[]> {
     await this.portfolioService.validateOwnership(portfolioId, userId);
 
     const allocations = await this.prisma.allocation.findMany({
@@ -118,23 +116,15 @@ export class AllocationService {
     return allocations.map((a) => this.mapToResponse(a));
   }
 
-  async findOne(
-    id: string,
-    userId: string,
-  ): Promise<AllocationResponseDto> {
+  async findOne(id: string, userId: string): Promise<AllocationResponseDto> {
     const allocation = await this.prisma.allocation.findUnique({
       where: { id },
       include: { portfolio: true },
     });
 
-    if (!allocation) {
-      throw new NotFoundException('Allocation not found');
-    }
+    if (!allocation) throw new NotFoundException('Allocation not found');
 
-    await this.portfolioService.validateOwnership(
-      allocation.portfolioId,
-      userId,
-    );
+    await this.portfolioService.validateOwnership(allocation.portfolioId, userId);
 
     return this.mapToResponse(allocation);
   }
@@ -149,37 +139,29 @@ export class AllocationService {
       include: { portfolio: true },
     });
 
-    if (!allocation) {
-      throw new NotFoundException('Allocation not found');
-    }
+    if (!allocation) throw new NotFoundException('Allocation not found');
 
-    await this.portfolioService.validateOwnership(
-      allocation.portfolioId,
-      userId,
-    );
+    await this.portfolioService.validateOwnership(allocation.portfolioId, userId);
 
-    // Validate total percentage if updating target
     if (dto.targetPercentage !== undefined) {
       const currentPercentage = Number(allocation.targetPercentage);
       const diff = dto.targetPercentage - currentPercentage;
       await this.validateTotalPercentage(allocation.portfolioId, diff);
     }
 
-    const totalCapital = Number(allocation.portfolio.totalCapital);
-    const newTargetPercentage =
-      dto.targetPercentage ?? Number(allocation.targetPercentage);
-    const allocationUSD = (totalCapital * newTargetPercentage) / 100;
+    const portfolio = allocation.portfolio;
+    const newTargetPercentage = dto.targetPercentage ?? Number(allocation.targetPercentage);
 
-    // Recalculate bucket amounts
-    const coreBucketUSD = allocationUSD * this.coreRatio;
-    const dipBucketUSD = allocationUSD * this.dipRatio;
-    const crashBucketUSD = allocationUSD * this.crashRatio;
+    const { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA } =
+      this.computeAllocationFields(
+        Number(portfolio.totalCapital),
+        newTargetPercentage,
+        Number(portfolio.coreRatio),
+        Number(portfolio.dipRatio),
+        Number(portfolio.crashRatio),
+        portfolio.dcaWeeksPerYear,
+      );
 
-    // Calculate DCA breakdown from Core bucket
-    const monthlyDCA = coreBucketUSD / 12;
-    const weeklyDCA = coreBucketUSD / 48;
-
-    // Calculate remaining (bucket - used)
     const coreUsed = Number(allocation.coreUsedUSD);
     const dipUsed = Number(allocation.dipUsedUSD);
     const crashUsed = Number(allocation.crashUsedUSD);
@@ -188,6 +170,11 @@ export class AllocationService {
       where: { id },
       data: {
         ...(dto.companyName !== undefined && { companyName: dto.companyName }),
+        ...(dto.isAggressive !== undefined && { isAggressive: dto.isAggressive }),
+        ...(dto.fiftyTwoWeekHigh !== undefined && {
+          fiftyTwoWeekHigh: dto.fiftyTwoWeekHigh,
+          fiftyTwoWeekHighUpdatedAt: new Date(),
+        }),
         ...(dto.targetPercentage !== undefined && {
           targetPercentage: dto.targetPercentage,
           allocationUSD,
@@ -196,9 +183,9 @@ export class AllocationService {
           crashBucketUSD,
           monthlyDCA,
           weeklyDCA,
-          coreRemainingUSD: coreBucketUSD - coreUsed,
-          dipRemainingUSD: dipBucketUSD - dipUsed,
-          crashRemainingUSD: crashBucketUSD - crashUsed,
+          coreRemainingUSD: Math.max(0, coreBucketUSD - coreUsed),
+          dipRemainingUSD: Math.max(0, dipBucketUSD - dipUsed),
+          crashRemainingUSD: Math.max(0, crashBucketUSD - crashUsed),
         }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
       },
@@ -208,24 +195,13 @@ export class AllocationService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const allocation = await this.prisma.allocation.findUnique({
-      where: { id },
-    });
+    const allocation = await this.prisma.allocation.findUnique({ where: { id } });
 
-    if (!allocation) {
-      throw new NotFoundException('Allocation not found');
-    }
+    if (!allocation) throw new NotFoundException('Allocation not found');
 
-    await this.portfolioService.validateOwnership(
-      allocation.portfolioId,
-      userId,
-    );
+    await this.portfolioService.validateOwnership(allocation.portfolioId, userId);
 
-    // Soft delete
-    await this.prisma.allocation.update({
-      where: { id },
-      data: { isActive: false },
-    });
+    await this.prisma.allocation.update({ where: { id }, data: { isActive: false } });
   }
 
   async bulkUpdate(
@@ -235,46 +211,37 @@ export class AllocationService {
   ): Promise<AllocationResponseDto[]> {
     await this.portfolioService.validateOwnership(portfolioId, userId);
 
-    // Validate total doesn't exceed 100%
-    const totalPercentage = allocations.reduce(
-      (sum, a) => sum + a.targetPercentage,
-      0,
-    );
-
+    const totalPercentage = allocations.reduce((sum, a) => sum + a.targetPercentage, 0);
     if (totalPercentage > 100) {
       throw new BadRequestException(
         `Total allocation (${totalPercentage}%) exceeds 100%`,
       );
     }
 
-    const portfolio = await this.prisma.portfolio.findUnique({
-      where: { id: portfolioId },
-    });
+    const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId } });
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
 
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
-
-    const totalCapital = Number(portfolio.totalCapital);
     const results: AllocationResponseDto[] = [];
 
     for (const item of allocations) {
       const symbol = item.symbol.toUpperCase();
-      const allocationUSD = (totalCapital * item.targetPercentage) / 100;
-      const coreBucketUSD = allocationUSD * this.coreRatio;
-      const dipBucketUSD = allocationUSD * this.dipRatio;
-      const crashBucketUSD = allocationUSD * this.crashRatio;
-      const monthlyDCA = coreBucketUSD / 12;
-      const weeklyDCA = coreBucketUSD / 48;
+      const { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA } =
+        this.computeAllocationFields(
+          Number(portfolio.totalCapital),
+          item.targetPercentage,
+          Number(portfolio.coreRatio),
+          Number(portfolio.dipRatio),
+          Number(portfolio.crashRatio),
+          portfolio.dcaWeeksPerYear,
+        );
 
       const allocation = await this.prisma.allocation.upsert({
-        where: {
-          portfolioId_symbol: { portfolioId, symbol },
-        },
+        where: { portfolioId_symbol: { portfolioId, symbol } },
         create: {
           portfolioId,
           symbol,
           targetPercentage: item.targetPercentage,
+          isAggressive: item.isAggressive ?? false,
           allocationUSD,
           coreBucketUSD,
           dipBucketUSD,
@@ -287,6 +254,7 @@ export class AllocationService {
         },
         update: {
           targetPercentage: item.targetPercentage,
+          ...(item.isAggressive !== undefined && { isAggressive: item.isAggressive }),
           allocationUSD,
           coreBucketUSD,
           dipBucketUSD,
@@ -309,84 +277,35 @@ export class AllocationService {
     return results;
   }
 
-  async getSummary(
-    portfolioId: string,
-    userId: string,
-  ): Promise<AllocationSummaryDto> {
+  async getSummary(portfolioId: string, userId: string): Promise<AllocationSummaryDto> {
     await this.portfolioService.validateOwnership(portfolioId, userId);
 
-    const portfolio = await this.prisma.portfolio.findUnique({
-      where: { id: portfolioId },
-    });
-
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
+    const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId } });
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
 
     const allocations = await this.prisma.allocation.findMany({
       where: { portfolioId, isActive: true },
     });
 
-    const totalTargetPercentage = allocations.reduce(
-      (sum, a) => sum + Number(a.targetPercentage),
-      0,
-    );
-    const totalAllocationUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.allocationUSD),
-      0,
-    );
-    const totalCoreBucketUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.coreBucketUSD),
-      0,
-    );
-    const totalDipBucketUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.dipBucketUSD),
-      0,
-    );
-    const totalCrashBucketUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.crashBucketUSD),
-      0,
-    );
-    const totalMonthlyDCA = allocations.reduce(
-      (sum, a) => sum + Number(a.monthlyDCA || 0),
-      0,
-    );
-    const totalWeeklyDCA = allocations.reduce(
-      (sum, a) => sum + Number(a.weeklyDCA || 0),
-      0,
-    );
-    const totalCoreUsedUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.coreUsedUSD),
-      0,
-    );
-    const totalDipUsedUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.dipUsedUSD),
-      0,
-    );
-    const totalCrashUsedUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.crashUsedUSD),
-      0,
-    );
-    const totalCoreRemainingUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.coreRemainingUSD || 0),
-      0,
-    );
-    const totalDipRemainingUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.dipRemainingUSD || 0),
-      0,
-    );
-    const totalCrashRemainingUSD = allocations.reduce(
-      (sum, a) => sum + Number(a.crashRemainingUSD || 0),
-      0,
-    );
-    const totalInvestedValue = allocations.reduce(
-      (sum, a) => sum + Number(a.investedValue || 0),
-      0,
-    );
+    const sum = (fn: (a: typeof allocations[0]) => number) =>
+      allocations.reduce((acc, a) => acc + fn(a), 0);
+
+    const totalTargetPercentage = sum((a) => Number(a.targetPercentage));
+    const totalAllocationUSD = sum((a) => Number(a.allocationUSD));
+    const totalCoreBucketUSD = sum((a) => Number(a.coreBucketUSD));
+    const totalDipBucketUSD = sum((a) => Number(a.dipBucketUSD));
+    const totalCrashBucketUSD = sum((a) => Number(a.crashBucketUSD));
+    const totalMonthlyDCA = sum((a) => Number(a.monthlyDCA || 0));
+    const totalWeeklyDCA = sum((a) => Number(a.weeklyDCA || 0));
+    const totalCoreUsedUSD = sum((a) => Number(a.coreUsedUSD));
+    const totalDipUsedUSD = sum((a) => Number(a.dipUsedUSD));
+    const totalCrashUsedUSD = sum((a) => Number(a.crashUsedUSD));
+    const totalCoreRemainingUSD = sum((a) => Number(a.coreRemainingUSD || 0));
+    const totalDipRemainingUSD = sum((a) => Number(a.dipRemainingUSD || 0));
+    const totalCrashRemainingUSD = sum((a) => Number(a.crashRemainingUSD || 0));
+    const totalInvestedValue = sum((a) => Number(a.investedValue || 0));
 
     const totalCapital = Number(portfolio.totalCapital);
-    const unallocatedPercentage = 100 - totalTargetPercentage;
-    const unallocatedUSD = totalCapital - totalAllocationUSD;
 
     return {
       totalTargetPercentage,
@@ -404,35 +323,39 @@ export class AllocationService {
       totalCrashRemainingUSD,
       totalInvestedValue,
       allocationsCount: allocations.length,
-      unallocatedPercentage,
-      unallocatedUSD,
+      unallocatedPercentage: 100 - totalTargetPercentage,
+      unallocatedUSD: totalCapital - totalAllocationUSD,
     };
   }
 
+  /** Recalculate all allocation derived fields from current portfolio ratios + capital.
+   *  Call this whenever totalCapital, coreRatio, dipRatio, crashRatio, or dcaWeeksPerYear changes.
+   */
   async recalculateBuckets(portfolioId: string): Promise<void> {
-    const portfolio = await this.prisma.portfolio.findUnique({
-      where: { id: portfolioId },
-    });
-
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
+    const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId } });
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
 
     const totalCapital = Number(portfolio.totalCapital);
+    const coreRatio = Number(portfolio.coreRatio);
+    const dipRatio = Number(portfolio.dipRatio);
+    const crashRatio = Number(portfolio.crashRatio);
+    const dcaWeeksPerYear = portfolio.dcaWeeksPerYear;
+
     const allocations = await this.prisma.allocation.findMany({
       where: { portfolioId, isActive: true },
     });
 
     for (const allocation of allocations) {
-      const allocationUSD =
-        (totalCapital * Number(allocation.targetPercentage)) / 100;
-      const coreBucketUSD = allocationUSD * this.coreRatio;
-      const dipBucketUSD = allocationUSD * this.dipRatio;
-      const crashBucketUSD = allocationUSD * this.crashRatio;
-      const monthlyDCA = coreBucketUSD / 12;
-      const weeklyDCA = coreBucketUSD / 48;
+      const { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA } =
+        this.computeAllocationFields(
+          totalCapital,
+          Number(allocation.targetPercentage),
+          coreRatio,
+          dipRatio,
+          crashRatio,
+          dcaWeeksPerYear,
+        );
 
-      // Calculate remaining based on usage
       const coreUsed = Number(allocation.coreUsedUSD);
       const dipUsed = Number(allocation.dipUsedUSD);
       const crashUsed = Number(allocation.crashUsedUSD);
@@ -487,6 +410,9 @@ export class AllocationService {
       symbol: allocation.symbol,
       companyName: allocation.companyName,
       targetPercentage: Number(allocation.targetPercentage),
+      isAggressive: allocation.isAggressive ?? false,
+      fiftyTwoWeekHigh: allocation.fiftyTwoWeekHigh != null ? Number(allocation.fiftyTwoWeekHigh) : null,
+      fiftyTwoWeekHighUpdatedAt: allocation.fiftyTwoWeekHighUpdatedAt ?? null,
       allocationUSD: Number(allocation.allocationUSD),
       coreBucketUSD: coreBucket,
       dipBucketUSD: dipBucket,
@@ -496,12 +422,14 @@ export class AllocationService {
       coreUsedUSD: coreUsed,
       dipUsedUSD: dipUsed,
       crashUsedUSD: crashUsed,
-      coreRemainingUSD: Number(allocation.coreRemainingUSD || (coreBucket - coreUsed)),
-      dipRemainingUSD: Number(allocation.dipRemainingUSD || (dipBucket - dipUsed)),
-      crashRemainingUSD: Number(allocation.crashRemainingUSD || (crashBucket - crashUsed)),
+      coreRemainingUSD: Number(allocation.coreRemainingUSD || Math.max(0, coreBucket - coreUsed)),
+      dipRemainingUSD: Number(allocation.dipRemainingUSD || Math.max(0, dipBucket - dipUsed)),
+      crashRemainingUSD: Number(allocation.crashRemainingUSD || Math.max(0, crashBucket - crashUsed)),
       sharesOwned: Number(allocation.sharesOwned),
       avgCostBasis: Number(allocation.avgCostBasis),
       investedValue: Number(allocation.investedValue || 0),
+      lastWeeklyBuyPrice: allocation.lastWeeklyBuyPrice != null ? Number(allocation.lastWeeklyBuyPrice) : null,
+      lastWeeklyBuyDate: allocation.lastWeeklyBuyDate ?? null,
       isActive: allocation.isActive,
       createdAt: allocation.createdAt,
       updatedAt: allocation.updatedAt,

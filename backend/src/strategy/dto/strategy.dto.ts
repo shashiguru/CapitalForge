@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum DipLevel {
@@ -6,7 +6,7 @@ export enum DipLevel {
   LIGHT_DIP = 'LIGHT_DIP',        // 10-15%
   MODERATE_DIP = 'MODERATE_DIP',  // 15-20%
   DIP_BUCKET = 'DIP_BUCKET',      // 20-30%
-  CRASH_BUCKET = 'CRASH_BUCKET',  // >30%
+  CRASH_BUCKET = 'CRASH_BUCKET',  // >=30%
 }
 
 export enum BucketType {
@@ -73,31 +73,43 @@ export class ApproveBuyPlanDto {
   approved: boolean;
 }
 
-// Pre-computed strategy table (matches Excel Strategy worksheet)
+// Live strategy table — one row per stock, columns = dip levels
 export class DipLevelThresholdDto {
-  dipPercent: number;        // 10, 15, 20, 30
-  thresholdPrice: number;    // Price at this dip level
-  buyUSD: number;            // Buy amount at this level
-  weeklyDipUSD: number;      // Weekly dip buy amount
-  bucketUsed: BucketType;    // Which bucket to use
+  dipPercent: number;
+  dipLabel: string;
+  thresholdPrice: number;
+  buyUSD: number;           // weeklyDCA × multiplier
+  buyShares: number;        // floor(buyUSD / currentPrice)
+  weeklyDipUSD: number;     // weeklyDCA × weeklyDipMultiplier
+  multiplier: number;       // the raw multiplier (1, 3, or 5)
+  bucketUsed: BucketType;
+  isActive: boolean;        // current price is at or below this threshold
 }
 
 export class StockStrategyTableDto {
   symbol: string;
   companyName: string | null;
-  fiftyTwoWeekHigh: number;
+  isAggressive: boolean;
+  // The reference high stored in Allocation (user-managed)
+  storedFiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekHighUpdatedAt: Date | null;
+  // Live from Yahoo Finance
+  liveFiftyTwoWeekHigh: number;
   currentPrice: number;
   currentDipPercent: number;
+  currentDipLevel: DipLevel;
   targetAllocationUSD: number;
   weeklyDCA: number;
-  
-  // Thresholds at each dip level
-  levels: {
-    tenPercent: DipLevelThresholdDto;      // 10% dip
-    fifteenPercent: DipLevelThresholdDto;  // 15% dip
-    twentyPercent: DipLevelThresholdDto;   // 20% dip
-    thirtyPercent: DipLevelThresholdDto;   // 30% dip
-  };
+  // Bucket remaining
+  coreRemainingUSD: number;
+  dipRemainingUSD: number;
+  crashRemainingUSD: number;
+  // Intra-week dip trigger
+  isWeeklyDipTriggered: boolean;
+  weeklyDipOpportunityUSD: number;
+  lastWeeklyBuyPrice: number | null;
+  // Levels
+  levels: DipLevelThresholdDto[];
 }
 
 export class PortfolioStrategyTableDto {
@@ -108,18 +120,48 @@ export class PortfolioStrategyTableDto {
   stocks: StockStrategyTableDto[];
 }
 
-// Stored strategy rules (user's predefined buy plan from spreadsheet)
+// Upsert strategy rule for a single dip level
+export class UpsertStrategyRuleDto {
+  @IsString()
+  symbol: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  dipPercent: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  buyMultiplier: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  weeklyDipMultiplier?: number;
+}
+
 export class StrategyRuleLevelDto {
   dipPercent: number;
   dipLabel: string;
+  buyMultiplier: number;
+  weeklyDipMultiplier: number;
+  // Computed from current weeklyDCA
+  buyUSD: number;
+  buyShares: number;
+  weeklyDipUSD: number;
   thresholdPrice: number;
-  buyQuantity: number;
-  weeklyDipQuantity: number | null;
 }
 
 export class StockStrategyRulesDto {
   symbol: string;
-  fiftyTwoWeekHigh: number;
+  isAggressive: boolean;
+  fiftyTwoWeekHigh: number | null;
+  weeklyDCA: number;
   levels: StrategyRuleLevelDto[];
 }
 

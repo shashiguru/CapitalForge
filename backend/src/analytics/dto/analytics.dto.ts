@@ -103,3 +103,43 @@ export class DipOpportunityDto {
   recommendedAction: string;
   bucketAvailable: number;
 }
+
+export class AllocationRebalanceRowDto {
+  symbol: string;
+  companyName: string | null;
+  // Target
+  targetPercent: number;
+  targetAllocationUSD: number;
+  // All-time
+  totalInvested: number;
+  allocationProgress: number;       // totalInvested / targetAllocationUSD * 100
+  rebalanceDelta: number;           // targetAllocationUSD - totalInvested (+ = need to buy)
+  // Current year (YTD)
+  ytdInvested: number;
+  ytdTransactionCount: number;
+  ytdProgress: number;              // ytdInvested / targetAllocationUSD * 100
+  ytdRebalanceDelta: number;        // targetAllocationUSD - ytdInvested
+  // Market
+  currentPrice: number;
+  currentValue: number;
+  allocationPercent: number;        // current value % of portfolio
+  driftPercent: number;             // allocationPercent - targetPercent
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  // Rebalancing
+  action: string;                   // 'BUY' | 'ON_TRACK' | 'OVERWEIGHT'
+  sharesToBuy: number;              // rebalanceDelta / currentPrice (if positive)
+}
+
+export class AllocationRebalanceDto {
+  portfolioId: string;
+  yearStart: Date;
+  yearEnd: Date;
+  rows: AllocationRebalanceRowDto[];
+  // Totals
+  totalTargetUSD: number;
+  totalInvested: number;
+  totalCurrentValue: number;
+  totalYtdInvested: number;
+  totalRebalanceDelta: number;
+}

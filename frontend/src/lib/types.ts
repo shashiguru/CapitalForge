@@ -31,10 +31,13 @@ export interface Portfolio {
   name: string;
   description: string | null;
   totalCapital: number;
-  strategyReferenceBudget: number | null;
   budgetYearStart: string | null;
   budgetYearEnd: string | null;
   currency: string;
+  coreRatio: number;
+  dipRatio: number;
+  crashRatio: number;
+  dcaWeeksPerYear: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -59,10 +62,13 @@ export interface CreatePortfolioDto {
   name: string;
   description?: string;
   totalCapital?: number;
-  strategyReferenceBudget?: number;
   budgetYearStart?: string;
   budgetYearEnd?: string;
   currency?: string;
+  coreRatio?: number;
+  dipRatio?: number;
+  crashRatio?: number;
+  dcaWeeksPerYear?: number;
 }
 
 export interface BudgetPreset {
@@ -70,7 +76,6 @@ export interface BudgetPreset {
   portfolioId: string;
   name: string;
   totalCapital: number;
-  strategyReferenceBudget: number | null;
   budgetYearStart: string | null;
   budgetYearEnd: string | null;
   createdAt: Date;
@@ -83,32 +88,39 @@ export interface Allocation {
   symbol: string;
   companyName: string | null;
   targetPercentage: number;
+  isAggressive: boolean;
+  fiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekHighUpdatedAt: Date | null;
   allocationUSD: number;
-  
+
   // Bucket allocations
   coreBucketUSD: number;
   dipBucketUSD: number;
   crashBucketUSD: number;
-  
+
   // DCA breakdown (from Core bucket)
   monthlyDCA: number;
   weeklyDCA: number;
-  
+
   // Bucket usage
   coreUsedUSD: number;
   dipUsedUSD: number;
   crashUsedUSD: number;
-  
+
   // Remaining balances
   coreRemainingUSD: number;
   dipRemainingUSD: number;
   crashRemainingUSD: number;
-  
+
   // Position tracking
   sharesOwned: number;
   avgCostBasis: number;
   investedValue: number;
-  
+
+  // Intra-week dip trigger
+  lastWeeklyBuyPrice: number | null;
+  lastWeeklyBuyDate: Date | null;
+
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -117,27 +129,17 @@ export interface Allocation {
 export interface AllocationSummary {
   totalTargetPercentage: number;
   totalAllocationUSD: number;
-  
-  // Bucket totals
   totalCoreBucketUSD: number;
   totalDipBucketUSD: number;
   totalCrashBucketUSD: number;
-  
-  // DCA totals
   totalMonthlyDCA: number;
   totalWeeklyDCA: number;
-  
-  // Usage totals
   totalCoreUsedUSD: number;
   totalDipUsedUSD: number;
   totalCrashUsedUSD: number;
-  
-  // Remaining totals
   totalCoreRemainingUSD: number;
   totalDipRemainingUSD: number;
   totalCrashRemainingUSD: number;
-  
-  // Portfolio stats
   totalInvestedValue: number;
   allocationsCount: number;
   unallocatedPercentage: number;
@@ -148,6 +150,7 @@ export interface CreateAllocationDto {
   symbol: string;
   companyName?: string;
   targetPercentage: number;
+  isAggressive?: boolean;
 }
 
 // Market Data Types
@@ -215,6 +218,74 @@ export interface StrategySnapshot {
   createdAt: Date;
 }
 
+// Live strategy table (new multiplier-based structure)
+export interface DipLevelThreshold {
+  dipPercent: number;
+  dipLabel: string;
+  thresholdPrice: number;
+  buyUSD: number;
+  buyShares: number;
+  weeklyDipUSD: number;
+  multiplier: number;
+  bucketUsed: BucketType;
+  isActive: boolean;
+}
+
+export interface StockStrategyTable {
+  symbol: string;
+  companyName: string | null;
+  isAggressive: boolean;
+  storedFiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekHighUpdatedAt: Date | null;
+  liveFiftyTwoWeekHigh: number;
+  currentPrice: number;
+  currentDipPercent: number;
+  currentDipLevel: DipLevel;
+  targetAllocationUSD: number;
+  weeklyDCA: number;
+  coreRemainingUSD: number;
+  dipRemainingUSD: number;
+  crashRemainingUSD: number;
+  isWeeklyDipTriggered: boolean;
+  weeklyDipOpportunityUSD: number;
+  lastWeeklyBuyPrice: number | null;
+  levels: DipLevelThreshold[];
+}
+
+export interface PortfolioStrategyTable {
+  portfolioId: string;
+  portfolioName: string;
+  totalWeeklyDCA: number;
+  asOfDate: Date;
+  stocks: StockStrategyTable[];
+}
+
+// Stored strategy rules (multiplier-based)
+export interface StrategyRuleLevel {
+  dipPercent: number;
+  dipLabel: string;
+  buyMultiplier: number;
+  weeklyDipMultiplier: number;
+  buyUSD: number;
+  buyShares: number;
+  weeklyDipUSD: number;
+  thresholdPrice: number;
+}
+
+export interface StockStrategyRules {
+  symbol: string;
+  isAggressive: boolean;
+  fiftyTwoWeekHigh: number | null;
+  weeklyDCA: number;
+  levels: StrategyRuleLevel[];
+}
+
+export interface StoredStrategyRules {
+  portfolioId: string;
+  portfolioName: string;
+  stocks: StockStrategyRules[];
+}
+
 // Budget Types
 export interface WeeklyBudget {
   id: string;
@@ -263,6 +334,7 @@ export interface Transaction {
   total: number;
   fees: number;
   notes: string | null;
+  bucketUsed: string | null;
   date: Date;
   executedAt: Date;
   createdAt: Date;
@@ -298,23 +370,15 @@ export interface StockAnalytics {
   currentValue: number;
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
-  
-  // Current allocation (based on current value)
   allocationPercent: number;
   targetPercent: number;
   driftPercent: number;
-  
-  // Allocation progress metrics (matches Excel "Current Positions")
-  investedAllocationPercent: number;  // % of total invested in this stock
-  expectedAllocationPercent: number;  // Expected % based on investment progress
-  allocationProgress: number;         // % of target allocation achieved
-  targetAllocationUSD: number;        // Target allocation in USD
-  
-  // Market data
+  investedAllocationPercent: number;
+  expectedAllocationPercent: number;
+  allocationProgress: number;
+  targetAllocationUSD: number;
   fiftyTwoWeekHigh: number;
   dipFromHigh: number;
-  
-  // DCA tracking
   monthlyDCA: number;
   weeklyDCA: number;
 }
@@ -359,6 +423,9 @@ export interface BucketUsage {
   utilizationPercent: number;
 }
 
+/** Timeseries data point: { date: string, [symbol: string]: number } */
+export type PortfolioTimeseries = Record<string, string | number>;
+
 export interface DipOpportunity {
   symbol: string;
   currentPrice: number;
@@ -369,56 +436,46 @@ export interface DipOpportunity {
   bucketAvailable: number;
 }
 
-// Strategy Table Types (matches Excel Strategy worksheet)
-export interface DipLevelThreshold {
-  dipPercent: number;
-  thresholdPrice: number;
-  buyUSD: number;
-  weeklyDipUSD: number;
-  bucketUsed: BucketType;
-}
-
-export interface StockStrategyTable {
+export interface AllocationRebalanceRow {
   symbol: string;
   companyName: string | null;
-  fiftyTwoWeekHigh: number;
-  currentPrice: number;
-  currentDipPercent: number;
+  targetPercent: number;
   targetAllocationUSD: number;
-  weeklyDCA: number;
-  levels: {
-    tenPercent: DipLevelThreshold;
-    fifteenPercent: DipLevelThreshold;
-    twentyPercent: DipLevelThreshold;
-    thirtyPercent: DipLevelThreshold;
-  };
+  totalInvested: number;
+  allocationProgress: number;
+  rebalanceDelta: number;
+  ytdInvested: number;
+  ytdTransactionCount: number;
+  ytdProgress: number;
+  ytdRebalanceDelta: number;
+  currentPrice: number;
+  currentValue: number;
+  allocationPercent: number;
+  driftPercent: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  action: 'BUY' | 'ON_TRACK' | 'OVERWEIGHT';
+  sharesToBuy: number;
 }
 
-export interface PortfolioStrategyTable {
+export interface AllocationRebalance {
   portfolioId: string;
-  portfolioName: string;
-  totalWeeklyDCA: number;
-  asOfDate: Date;
-  stocks: StockStrategyTable[];
+  yearStart: string;
+  yearEnd: string;
+  rows: AllocationRebalanceRow[];
+  totalTargetUSD: number;
+  totalInvested: number;
+  totalCurrentValue: number;
+  totalYtdInvested: number;
+  totalRebalanceDelta: number;
 }
 
-// Stored strategy rules (user's predefined buy plan from spreadsheet)
-export interface StrategyRuleLevel {
-  dipPercent: number;
-  dipLabel: string;
-  thresholdPrice: number;
-  buyQuantity: number;
-  weeklyDipQuantity: number | null;
-}
-
-export interface StockStrategyRules {
-  symbol: string;
-  fiftyTwoWeekHigh: number;
-  levels: StrategyRuleLevel[];
-}
-
-export interface StoredStrategyRules {
+// Investor
+export interface Investor {
+  id: string;
   portfolioId: string;
-  portfolioName: string;
-  stocks: StockStrategyRules[];
+  name: string;
+  contributionAmount: number;
+  createdAt: Date;
+  updatedAt: Date;
 }

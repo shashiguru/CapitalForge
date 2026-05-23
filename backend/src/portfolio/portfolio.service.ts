@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -20,18 +21,18 @@ import {
 export class PortfolioService {
   constructor(private prisma: PrismaService) {}
 
-  async create(
-    userId: string,
-    dto: CreatePortfolioDto,
-  ): Promise<PortfolioResponseDto> {
+  async create(userId: string, dto: CreatePortfolioDto): Promise<PortfolioResponseDto> {
     const portfolio = await this.prisma.portfolio.create({
       data: {
         userId,
         name: dto.name,
         description: dto.description,
         totalCapital: dto.totalCapital || 0,
-        strategyReferenceBudget: dto.strategyReferenceBudget ?? undefined,
         currency: dto.currency || 'USD',
+        ...(dto.coreRatio !== undefined && { coreRatio: dto.coreRatio }),
+        ...(dto.dipRatio !== undefined && { dipRatio: dto.dipRatio }),
+        ...(dto.crashRatio !== undefined && { crashRatio: dto.crashRatio }),
+        ...(dto.dcaWeeksPerYear !== undefined && { dcaWeeksPerYear: dto.dcaWeeksPerYear }),
       },
     });
 
@@ -42,12 +43,7 @@ export class PortfolioService {
     const portfolios = await this.prisma.portfolio.findMany({
       where: { userId, isActive: true },
       include: {
-        _count: {
-          select: {
-            allocations: true,
-            transactions: true,
-          },
-        },
+        _count: { select: { allocations: true, transactions: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -63,22 +59,12 @@ export class PortfolioService {
     const portfolio = await this.prisma.portfolio.findUnique({
       where: { id },
       include: {
-        _count: {
-          select: {
-            allocations: true,
-            transactions: true,
-          },
-        },
+        _count: { select: { allocations: true, transactions: true } },
       },
     });
 
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
-
-    if (portfolio.userId !== userId) {
-      throw new ForbiddenException('Access denied');
-    }
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
+    if (portfolio.userId !== userId) throw new ForbiddenException('Access denied');
 
     return {
       ...this.mapToResponse(portfolio),
@@ -87,12 +73,27 @@ export class PortfolioService {
     };
   }
 
-  async update(
-    id: string,
-    userId: string,
-    dto: UpdatePortfolioDto,
-  ): Promise<PortfolioResponseDto> {
+  async update(id: string, userId: string, dto: UpdatePortfolioDto): Promise<PortfolioResponseDto> {
     await this.validateOwnership(id, userId);
+
+    // Validate ratios sum to 1.0 if any are provided
+    if (
+      dto.coreRatio !== undefined ||
+      dto.dipRatio !== undefined ||
+      dto.crashRatio !== undefined
+    ) {
+      const current = await this.prisma.portfolio.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException('Portfolio not found');
+      const core = dto.coreRatio ?? Number(current.coreRatio);
+      const dip = dto.dipRatio ?? Number(current.dipRatio);
+      const crash = dto.crashRatio ?? Number(current.crashRatio);
+      const sum = core + dip + crash;
+      if (Math.abs(sum - 1.0) > 0.001) {
+        throw new BadRequestException(
+          `Bucket ratios must sum to 1.0 (got ${sum.toFixed(4)})`,
+        );
+      }
+    }
 
     const portfolio = await this.prisma.portfolio.update({
       where: { id },
@@ -100,25 +101,39 @@ export class PortfolioService {
         ...(dto.name && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.totalCapital !== undefined && { totalCapital: dto.totalCapital }),
-        ...(dto.strategyReferenceBudget !== undefined && { strategyReferenceBudget: dto.strategyReferenceBudget }),
-        ...(dto.budgetYearStart !== undefined && { budgetYearStart: dto.budgetYearStart ? new Date(dto.budgetYearStart) : null }),
-        ...(dto.budgetYearEnd !== undefined && { budgetYearEnd: dto.budgetYearEnd ? new Date(dto.budgetYearEnd) : null }),
+        ...(dto.budgetYearStart !== undefined && {
+          budgetYearStart: dto.budgetYearStart ? new Date(dto.budgetYearStart) : null,
+        }),
+        ...(dto.budgetYearEnd !== undefined && {
+          budgetYearEnd: dto.budgetYearEnd ? new Date(dto.budgetYearEnd) : null,
+        }),
         ...(dto.currency && { currency: dto.currency }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.coreRatio !== undefined && { coreRatio: dto.coreRatio }),
+        ...(dto.dipRatio !== undefined && { dipRatio: dto.dipRatio }),
+        ...(dto.crashRatio !== undefined && { crashRatio: dto.crashRatio }),
+        ...(dto.dcaWeeksPerYear !== undefined && { dcaWeeksPerYear: dto.dcaWeeksPerYear }),
       },
     });
+
+    // If anything that affects bucket calculations changed, recalculate
+    const shouldRecalc =
+      dto.totalCapital !== undefined ||
+      dto.coreRatio !== undefined ||
+      dto.dipRatio !== undefined ||
+      dto.crashRatio !== undefined ||
+      dto.dcaWeeksPerYear !== undefined;
+
+    if (shouldRecalc) {
+      await this.recalculateBuckets(id);
+    }
 
     return this.mapToResponse(portfolio);
   }
 
   async remove(id: string, userId: string): Promise<void> {
     await this.validateOwnership(id, userId);
-
-    // Soft delete - set isActive to false
-    await this.prisma.portfolio.update({
-      where: { id },
-      data: { isActive: false },
-    });
+    await this.prisma.portfolio.update({ where: { id }, data: { isActive: false } });
   }
 
   async getBudgetPresets(portfolioId: string, userId: string): Promise<BudgetPresetResponseDto[]> {
@@ -141,7 +156,6 @@ export class PortfolioService {
         portfolioId,
         name: dto.name,
         totalCapital: dto.totalCapital,
-        strategyReferenceBudget: dto.strategyReferenceBudget ?? undefined,
         budgetYearStart: dto.budgetYearStart ? new Date(dto.budgetYearStart) : undefined,
         budgetYearEnd: dto.budgetYearEnd ? new Date(dto.budgetYearEnd) : undefined,
       },
@@ -159,24 +173,22 @@ export class PortfolioService {
     const preset = await this.prisma.budgetPreset.findFirst({
       where: { id: presetId, portfolioId },
     });
-    if (!preset) {
-      throw new NotFoundException('Budget preset not found');
-    }
+    if (!preset) throw new NotFoundException('Budget preset not found');
+
     const updateData: Record<string, unknown> = {};
-    if (dto.name != null && dto.name !== '') updateData.name = dto.name;
-    if (dto.totalCapital != null && !Number.isNaN(dto.totalCapital)) updateData.totalCapital = dto.totalCapital;
-    if (dto.strategyReferenceBudget != null && !Number.isNaN(dto.strategyReferenceBudget)) updateData.strategyReferenceBudget = dto.strategyReferenceBudget;
-    if (dto.budgetYearStart != null && dto.budgetYearStart !== '') {
-      const startDate = new Date(dto.budgetYearStart);
-      if (!Number.isNaN(startDate.getTime())) updateData.budgetYearStart = startDate;
+    if (dto.name) updateData.name = dto.name;
+    if (dto.totalCapital != null) updateData.totalCapital = dto.totalCapital;
+    if (dto.budgetYearStart) {
+      const d = new Date(dto.budgetYearStart);
+      if (!isNaN(d.getTime())) updateData.budgetYearStart = d;
     }
-    if (dto.budgetYearEnd != null && dto.budgetYearEnd !== '') {
-      const endDate = new Date(dto.budgetYearEnd);
-      if (!Number.isNaN(endDate.getTime())) updateData.budgetYearEnd = endDate;
+    if (dto.budgetYearEnd) {
+      const d = new Date(dto.budgetYearEnd);
+      if (!isNaN(d.getTime())) updateData.budgetYearEnd = d;
     }
-    if (Object.keys(updateData).length === 0) {
-      return this.mapPresetToResponse(preset);
-    }
+
+    if (Object.keys(updateData).length === 0) return this.mapPresetToResponse(preset);
+
     const updated = await this.prisma.budgetPreset.update({
       where: { id: presetId },
       data: updateData as any,
@@ -193,12 +205,8 @@ export class PortfolioService {
     const preset = await this.prisma.budgetPreset.findFirst({
       where: { id: presetId, portfolioId },
     });
-    if (!preset) {
-      throw new NotFoundException('Budget preset not found');
-    }
-    // Apply preset: update budget and period only. Keep strategyReferenceBudget - it's the
-    // budget the strategy rules were designed for (e.g. $23,639) and must not change when
-    // switching budgets, so scaling (totalCapital/strategyReferenceBudget) works correctly.
+    if (!preset) throw new NotFoundException('Budget preset not found');
+
     const portfolio = await this.prisma.portfolio.update({
       where: { id: portfolioId },
       data: {
@@ -207,6 +215,10 @@ export class PortfolioService {
         budgetYearEnd: preset.budgetYearEnd,
       },
     });
+
+    // Recalculate all allocation buckets with the new budget
+    await this.recalculateBuckets(portfolioId);
+
     return this.mapToResponse(portfolio);
   }
 
@@ -219,24 +231,8 @@ export class PortfolioService {
     const preset = await this.prisma.budgetPreset.findFirst({
       where: { id: presetId, portfolioId },
     });
-    if (!preset) {
-      throw new NotFoundException('Budget preset not found');
-    }
+    if (!preset) throw new NotFoundException('Budget preset not found');
     await this.prisma.budgetPreset.delete({ where: { id: presetId } });
-  }
-
-  private mapPresetToResponse(preset: any): BudgetPresetResponseDto {
-    const toDateStr = (d: Date | null) => (d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null);
-    return {
-      id: preset.id,
-      portfolioId: preset.portfolioId,
-      name: preset.name,
-      totalCapital: Number(preset.totalCapital),
-      strategyReferenceBudget: preset.strategyReferenceBudget != null ? Number(preset.strategyReferenceBudget) : null,
-      budgetYearStart: toDateStr(preset.budgetYearStart),
-      budgetYearEnd: toDateStr(preset.budgetYearEnd),
-      createdAt: preset.createdAt,
-    };
   }
 
   async getSummary(id: string, userId: string): Promise<PortfolioSummaryDto> {
@@ -245,20 +241,13 @@ export class PortfolioService {
     const portfolio = await this.prisma.portfolio.findUnique({
       where: { id },
       include: {
-        allocations: {
-          where: { isActive: true },
-        },
-        transactions: {
-          where: { type: 'BUY' },
-        },
+        allocations: { where: { isActive: true } },
+        transactions: { where: { type: 'BUY' } },
       },
     });
 
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
 
-    // Calculate totals
     const totalAllocated = portfolio.allocations.reduce(
       (sum, a) => sum + Number(a.allocationUSD),
       0,
@@ -269,7 +258,6 @@ export class PortfolioService {
       0,
     );
 
-    // Get current prices and calculate value
     const symbols = portfolio.allocations.map((a) => a.symbol);
     const latestPrices = await this.getLatestPrices(symbols);
 
@@ -297,53 +285,105 @@ export class PortfolioService {
     };
   }
 
+  /** Recalculate allocation bucket sizes based on current portfolio ratios/capital.
+   *  Called whenever totalCapital, coreRatio, dipRatio, crashRatio, or dcaWeeksPerYear changes.
+   */
+  async recalculateBuckets(portfolioId: string): Promise<void> {
+    const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId } });
+    if (!portfolio) return;
+
+    const totalCapital = Number(portfolio.totalCapital);
+    const coreRatio = Number(portfolio.coreRatio);
+    const dipRatio = Number(portfolio.dipRatio);
+    const crashRatio = Number(portfolio.crashRatio);
+    const dcaWeeksPerYear = portfolio.dcaWeeksPerYear;
+
+    const allocations = await this.prisma.allocation.findMany({
+      where: { portfolioId, isActive: true },
+    });
+
+    for (const a of allocations) {
+      const allocationUSD = (totalCapital * Number(a.targetPercentage)) / 100;
+      const coreBucketUSD = allocationUSD * coreRatio;
+      const dipBucketUSD = allocationUSD * dipRatio;
+      const crashBucketUSD = allocationUSD * crashRatio;
+      const monthlyDCA = coreBucketUSD / 12;
+      const weeklyDCA = coreBucketUSD / dcaWeeksPerYear;
+      const coreUsed = Number(a.coreUsedUSD);
+      const dipUsed = Number(a.dipUsedUSD);
+      const crashUsed = Number(a.crashUsedUSD);
+
+      await this.prisma.allocation.update({
+        where: { id: a.id },
+        data: {
+          allocationUSD,
+          coreBucketUSD,
+          dipBucketUSD,
+          crashBucketUSD,
+          monthlyDCA,
+          weeklyDCA,
+          coreRemainingUSD: Math.max(0, coreBucketUSD - coreUsed),
+          dipRemainingUSD: Math.max(0, dipBucketUSD - dipUsed),
+          crashRemainingUSD: Math.max(0, crashBucketUSD - crashUsed),
+        },
+      });
+    }
+  }
+
   async validateOwnership(portfolioId: string, userId: string): Promise<void> {
     const portfolio = await this.prisma.portfolio.findUnique({
       where: { id: portfolioId },
       select: { userId: true },
     });
 
-    if (!portfolio) {
-      throw new NotFoundException('Portfolio not found');
-    }
-
-    if (portfolio.userId !== userId) {
-      throw new ForbiddenException('Access denied');
-    }
+    if (!portfolio) throw new NotFoundException('Portfolio not found');
+    if (portfolio.userId !== userId) throw new ForbiddenException('Access denied');
   }
 
   private async getLatestPrices(symbols: string[]): Promise<Map<string, number>> {
     const priceMap = new Map<string, number>();
-
     if (symbols.length === 0) return priceMap;
 
     const prices = await this.prisma.priceDaily.findMany({
-      where: {
-        symbol: { in: symbols },
-      },
+      where: { symbol: { in: symbols } },
       orderBy: { date: 'desc' },
       distinct: ['symbol'],
     });
 
-    prices.forEach((p) => {
-      priceMap.set(p.symbol, Number(p.close));
-    });
-
+    prices.forEach((p) => priceMap.set(p.symbol, Number(p.close)));
     return priceMap;
   }
 
+  private mapPresetToResponse(preset: any): BudgetPresetResponseDto {
+    const toDateStr = (d: Date | null) =>
+      d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null;
+    return {
+      id: preset.id,
+      portfolioId: preset.portfolioId,
+      name: preset.name,
+      totalCapital: Number(preset.totalCapital),
+      budgetYearStart: toDateStr(preset.budgetYearStart),
+      budgetYearEnd: toDateStr(preset.budgetYearEnd),
+      createdAt: preset.createdAt,
+    };
+  }
+
   private mapToResponse(portfolio: any): PortfolioResponseDto {
-    const toDateStr = (d: Date | null) => (d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null);
+    const toDateStr = (d: Date | null) =>
+      d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null;
     return {
       id: portfolio.id,
       userId: portfolio.userId,
       name: portfolio.name,
       description: portfolio.description,
       totalCapital: Number(portfolio.totalCapital),
-      strategyReferenceBudget: portfolio.strategyReferenceBudget != null ? Number(portfolio.strategyReferenceBudget) : null,
       budgetYearStart: toDateStr(portfolio.budgetYearStart),
       budgetYearEnd: toDateStr(portfolio.budgetYearEnd),
       currency: portfolio.currency,
+      coreRatio: Number(portfolio.coreRatio ?? 0.60),
+      dipRatio: Number(portfolio.dipRatio ?? 0.30),
+      crashRatio: Number(portfolio.crashRatio ?? 0.10),
+      dcaWeeksPerYear: portfolio.dcaWeeksPerYear ?? 48,
       isActive: portfolio.isActive,
       createdAt: portfolio.createdAt,
       updatedAt: portfolio.updatedAt,

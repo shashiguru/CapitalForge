@@ -259,11 +259,11 @@ export class AnalyticsService {
 
         if (holding.dipFromHigh >= 30) {
           dipLevel = 'CRASH';
-          recommendedAction = 'Deploy crash bucket capital';
+          recommendedAction = 'Significant dip – consider adding';
           bucketAvailable = crashBucketRemaining;
         } else if (holding.dipFromHigh >= 20) {
           dipLevel = 'SIGNIFICANT';
-          recommendedAction = 'Deploy dip bucket capital';
+          recommendedAction = 'Notable dip – consider adding';
           bucketAvailable = dipBucketRemaining;
         } else if (holding.dipFromHigh >= 15) {
           dipLevel = 'MODERATE';
@@ -334,6 +334,210 @@ export class AnalyticsService {
       endValue: analytics.totalCurrentValue,
       highValue: analytics.totalCurrentValue,
       lowValue: analytics.totalInvested,
+    };
+  }
+
+  async getPortfolioTimeseries(
+    portfolioId: string,
+    userId: string,
+    days: number = 90,
+  ): Promise<Array<Record<string, string | number>>> {
+    await this.portfolioService.validateOwnership(portfolioId, userId);
+
+    const portfolio = await this.prisma.portfolio.findUnique({
+      where: { id: portfolioId },
+      include: { allocations: { where: { isActive: true } } },
+    });
+
+    if (!portfolio?.allocations?.length) return [];
+
+    const dateValueMap = new Map<string, Record<string, string | number>>();
+    const symbols = portfolio.allocations.map((a) => a.symbol);
+    const sharesMap = new Map(portfolio.allocations.map((a) => [a.symbol, Number(a.sharesOwned)]));
+
+    const allDates = new Set<string>();
+
+    for (const symbol of symbols) {
+      const prices = await this.marketDataService.getPriceHistory(symbol, days);
+      const shares = sharesMap.get(symbol) ?? 0;
+
+      for (const p of prices) {
+        const dateStr = p.date instanceof Date ? p.date.toISOString().slice(0, 10) : String(p.date).slice(0, 10);
+        const value = shares * Number(p.close);
+        allDates.add(dateStr);
+
+        if (!dateValueMap.has(dateStr)) {
+          dateValueMap.set(dateStr, { date: dateStr });
+        }
+        const row = dateValueMap.get(dateStr)!;
+        row[symbol] = Math.round(value * 100) / 100;
+      }
+    }
+
+    const sortedDates = Array.from(allDates).sort();
+
+    if (sortedDates.length === 0) {
+      // Fallback: no price history - use current values from analytics
+      const analytics = await this.getPortfolioAnalytics(portfolioId, userId);
+      const today = new Date().toISOString().slice(0, 10);
+      const result: Record<string, string | number> = { date: today };
+      for (const h of analytics.holdings) {
+        result[h.symbol] = Math.round(h.currentValue * 100) / 100;
+      }
+      return [result];
+    }
+
+    return sortedDates.map((dateStr) => {
+      const row = dateValueMap.get(dateStr) ?? { date: dateStr };
+      const result: Record<string, string | number> = { date: dateStr };
+      for (const symbol of symbols) {
+        result[symbol] = Number(row[symbol]) || 0;
+      }
+      return result;
+    });
+  }
+
+  async getWeeklyTransactions(
+    portfolioId: string,
+    userId: string,
+    weeks: number = 12,
+  ): Promise<Array<Record<string, string | number>>> {
+    await this.portfolioService.validateOwnership(portfolioId, userId);
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - weeks * 7);
+    startDate.setHours(0, 0, 0, 0);
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        portfolioId,
+        type: 'BUY',
+        date: { gte: startDate },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    const weekMap = new Map<string, Record<string, string | number>>();
+
+    const getWeekStart = (d: Date) => {
+      const date = new Date(d);
+      const day = date.getDay();
+      const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+      date.setDate(diff);
+      date.setHours(0, 0, 0, 0);
+      return date.toISOString().slice(0, 10);
+    };
+
+    for (const tx of transactions) {
+      const weekStart = getWeekStart(new Date(tx.date));
+      const total = Number(tx.price) * Number(tx.quantity);
+      const symbol = tx.symbol;
+
+      if (!weekMap.has(weekStart)) {
+        weekMap.set(weekStart, { week: weekStart });
+      }
+      const row = weekMap.get(weekStart)!;
+      row[symbol] = Math.round(((Number(row[symbol]) || 0) + total) * 100) / 100;
+    }
+
+    return Array.from(weekMap.values()).sort((a, b) =>
+      String(a.week).localeCompare(String(b.week)),
+    );
+  }
+
+  async getAllocationRebalance(
+    portfolioId: string,
+    userId: string,
+  ) {
+    await this.portfolioService.validateOwnership(portfolioId, userId);
+
+    const portfolio = await this.prisma.portfolio.findUnique({
+      where: { id: portfolioId },
+    });
+    if (!portfolio) throw new Error('Portfolio not found');
+
+    // Determine current fiscal year bounds
+    const now = new Date();
+    let yearStart: Date;
+    let yearEnd: Date;
+    if (portfolio.budgetYearStart) {
+      const base = new Date(portfolio.budgetYearStart);
+      yearStart = new Date(now.getFullYear(), base.getMonth(), base.getDate());
+      if (yearStart > now) yearStart.setFullYear(yearStart.getFullYear() - 1);
+      yearEnd = new Date(yearStart);
+      yearEnd.setFullYear(yearEnd.getFullYear() + 1);
+    } else {
+      yearStart = new Date(now.getFullYear(), 0, 1);
+      yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+    }
+
+    // Get portfolio analytics (all-time)
+    const analytics = await this.getPortfolioAnalytics(portfolioId, userId);
+
+    // Aggregate YTD BUY transactions per symbol
+    const ytdTxRaw = await this.prisma.transaction.groupBy({
+      by: ['symbol'],
+      where: { portfolioId, type: 'BUY', date: { gte: yearStart, lt: yearEnd } },
+      _sum: { total: true },
+      _count: { _all: true },
+    });
+    const ytdMap = new Map(
+      ytdTxRaw.map((t) => [
+        t.symbol,
+        { ytdInvested: Number(t._sum.total ?? 0), ytdCount: t._count._all },
+      ]),
+    );
+
+    const rows = analytics.holdings.map((h) => {
+      const ytd = ytdMap.get(h.symbol) ?? { ytdInvested: 0, ytdCount: 0 };
+      const ytdProgress =
+        h.targetAllocationUSD > 0 ? (ytd.ytdInvested / h.targetAllocationUSD) * 100 : 0;
+      const rebalanceDelta = h.targetAllocationUSD - h.totalInvested;
+      const ytdRebalanceDelta = h.targetAllocationUSD - ytd.ytdInvested;
+      const action =
+        rebalanceDelta > h.targetAllocationUSD * 0.05
+          ? 'BUY'
+          : rebalanceDelta < -h.targetAllocationUSD * 0.05
+          ? 'OVERWEIGHT'
+          : 'ON_TRACK';
+      const sharesToBuy =
+        rebalanceDelta > 0 && h.currentPrice > 0
+          ? Math.floor(rebalanceDelta / h.currentPrice)
+          : 0;
+
+      return {
+        symbol: h.symbol,
+        companyName: h.companyName,
+        targetPercent: h.targetPercent,
+        targetAllocationUSD: h.targetAllocationUSD,
+        totalInvested: h.totalInvested,
+        allocationProgress: h.allocationProgress,
+        rebalanceDelta,
+        ytdInvested: ytd.ytdInvested,
+        ytdTransactionCount: ytd.ytdCount,
+        ytdProgress,
+        ytdRebalanceDelta,
+        currentPrice: h.currentPrice,
+        currentValue: h.currentValue,
+        allocationPercent: h.allocationPercent,
+        driftPercent: h.driftPercent,
+        unrealizedPnL: h.unrealizedPnL,
+        unrealizedPnLPercent: h.unrealizedPnLPercent,
+        action,
+        sharesToBuy,
+      };
+    });
+
+    return {
+      portfolioId,
+      yearStart,
+      yearEnd,
+      rows,
+      totalTargetUSD: rows.reduce((s, r) => s + r.targetAllocationUSD, 0),
+      totalInvested: analytics.totalInvested,
+      totalCurrentValue: analytics.totalCurrentValue,
+      totalYtdInvested: rows.reduce((s, r) => s + r.ytdInvested, 0),
+      totalRebalanceDelta: rows.reduce((s, r) => s + r.rebalanceDelta, 0),
     };
   }
 }

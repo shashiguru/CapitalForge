@@ -32,7 +32,7 @@ export class MarketDataService {
    * Sync using Yahoo Finance quote() for real-time: current price, 52w high, 52w low.
    * Also backfills historical data for new symbols.
    */
-  private readonly DATA_RETENTION_DAYS = 14; // Store only last 2 weeks
+  private readonly DATA_RETENTION_DAYS = 90; // Store last 90 days for portfolio value charts
 
   private async syncSymbolsWithQuote(symbols: string[]): Promise<SyncResultDto> {
     const symbolsSynced: string[] = [];

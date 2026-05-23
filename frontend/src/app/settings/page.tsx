@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePortfolio } from '@/contexts/portfolio-context';
+import { useAuth } from '@/contexts/auth-context';
 import { portfolioApi, allocationApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,8 +14,43 @@ import { toast } from 'sonner';
 
 export default function SettingsPage() {
   const { selectedPortfolio, fetchPortfolios, refreshPortfolio } = usePortfolio();
+  const { user, updateProfile } = useAuth();
+
+  // Profile state
+  const [displayName, setDisplayName] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (user) setDisplayName(user.name ?? '');
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (newPassword && newPassword !== confirmPassword) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (newPassword && !currentPassword) {
+      toast.error('Enter your current password to change it');
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      await updateProfile({
+        name: displayName.trim() || undefined,
+        ...(newPassword ? { currentPassword, newPassword } : {}),
+      });
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      toast.success('Profile updated');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Failed to update profile');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
   const [yearlyBudget, setYearlyBudget] = useState('');
-  const [strategyReferenceBudget, setStrategyReferenceBudget] = useState('');
   const [yearStart, setYearStart] = useState('');
   const [yearEnd, setYearEnd] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -22,11 +58,6 @@ export default function SettingsPage() {
   useEffect(() => {
     if (selectedPortfolio) {
       setYearlyBudget(selectedPortfolio.totalCapital.toString());
-      setStrategyReferenceBudget(
-        selectedPortfolio.strategyReferenceBudget != null
-          ? selectedPortfolio.strategyReferenceBudget.toString()
-          : selectedPortfolio.totalCapital.toString()
-      );
       const y = new Date().getFullYear();
       setYearStart(selectedPortfolio.budgetYearStart ?? `${y}-01-01`);
       setYearEnd(selectedPortfolio.budgetYearEnd ?? `${y}-12-31`);
@@ -37,14 +68,9 @@ export default function SettingsPage() {
     if (!selectedPortfolio) return;
 
     const totalCapital = parseFloat(yearlyBudget);
-    const refBudgetVal = strategyReferenceBudget.trim() === '' ? totalCapital : parseFloat(strategyReferenceBudget);
 
     if (isNaN(totalCapital) || totalCapital < 0) {
       toast.error('Please enter a valid yearly budget');
-      return;
-    }
-    if (isNaN(refBudgetVal) || refBudgetVal < 0) {
-      toast.error('Please enter a valid strategy reference budget');
       return;
     }
 
@@ -63,7 +89,6 @@ export default function SettingsPage() {
     try {
       await portfolioApi.update(selectedPortfolio.id, {
         totalCapital,
-        strategyReferenceBudget: refBudgetVal,
         budgetYearStart: startDate,
         budgetYearEnd: endDate,
       });
@@ -97,9 +122,75 @@ export default function SettingsPage() {
     <AppShell>
       <div className="space-y-6 w-full max-w-2xl">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted-foreground">Manage your portfolio and strategy budget</p>
+          <h1 className="text-4xl font-serif font-normal">Settings</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage your profile and portfolio configuration</p>
         </div>
+
+        {/* ── Profile ── */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Profile</CardTitle>
+            <CardDescription>
+              Update your display name and password. Your name appears in the nav bar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" value={user?.email ?? ''} disabled className="bg-muted/40 text-muted-foreground" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="displayName">Display Name</Label>
+              <Input
+                id="displayName"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Your name"
+              />
+            </div>
+            <div className="pt-2 border-t border-border">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Change Password</p>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="currentPassword">Current Password</Label>
+                  <Input
+                    id="currentPassword"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Leave blank to keep unchanged"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword">New Password</Label>
+                    <Input
+                      id="newPassword"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Min 8 characters"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Repeat new password"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Button onClick={handleSaveProfile} disabled={isSavingProfile}>
+              {isSavingProfile ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Profile
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
@@ -120,21 +211,6 @@ export default function SettingsPage() {
                 onChange={(e) => setYearlyBudget(e.target.value)}
                 placeholder="e.g. 20000"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="strategyRefBudget">Strategy Reference Budget ($)</Label>
-              <Input
-                id="strategyRefBudget"
-                type="number"
-                min={0}
-                step={100}
-                value={strategyReferenceBudget}
-                onChange={(e) => setStrategyReferenceBudget(e.target.value)}
-                placeholder="e.g. 23639"
-              />
-              <p className="text-xs text-muted-foreground">
-                The yearly budget your strategy was designed for (e.g. last year&apos;s budget). Leave same as yearly budget for no scaling.
-              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

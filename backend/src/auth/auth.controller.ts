@@ -2,12 +2,13 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, AuthResponseDto, UserProfileDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, AuthResponseDto, UserProfileDto, UpdateProfileDto } from './dto/auth.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('auth')
@@ -29,5 +30,13 @@ export class AuthController {
   @Get('profile')
   async getProfile(@CurrentUser('id') userId: string): Promise<UserProfileDto> {
     return this.authService.getProfile(userId);
+  }
+
+  @Patch('profile')
+  async updateProfile(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ): Promise<UserProfileDto> {
+    return this.authService.updateProfile(userId, dto);
   }
 }

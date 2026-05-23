@@ -234,6 +234,27 @@ export class BudgetService {
     };
   }
 
+  async restoreToBudget(
+    portfolioId: string,
+    amount: number,
+  ): Promise<void> {
+    const weekStartDate = this.getWeekStartDate(new Date());
+
+    const budget = await this.prisma.weeklyBudget.findUnique({
+      where: { portfolioId_weekStartDate: { portfolioId, weekStartDate } },
+    });
+
+    if (budget) {
+      await this.prisma.weeklyBudget.update({
+        where: { id: budget.id },
+        data: {
+          usedAmount: { decrement: amount },
+          remainingAmount: { increment: amount },
+        },
+      });
+    }
+  }
+
   async deductFromBudget(
     portfolioId: string,
     amount: number,

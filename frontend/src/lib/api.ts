@@ -23,7 +23,9 @@ import type {
   PortfolioAnalytics,
   AllocationChartData,
   BucketUsage,
+  PortfolioTimeseries,
   DipOpportunity,
+  AllocationRebalance,
   User,
   PortfolioStrategyTable,
   StoredStrategyRules,
@@ -80,6 +82,11 @@ export const authApi = {
     const { data } = await api.get<User>('/auth/profile');
     return data;
   },
+
+  updateProfile: async (dto: { name?: string; currentPassword?: string; newPassword?: string }): Promise<User> => {
+    const { data } = await api.patch<User>('/auth/profile', dto);
+    return data;
+  },
 };
 
 // Portfolio API
@@ -118,12 +125,12 @@ export const portfolioApi = {
     return data;
   },
 
-  createBudgetPreset: async (portfolioId: string, dto: { name: string; totalCapital: number; strategyReferenceBudget?: number; budgetYearStart?: string; budgetYearEnd?: string }): Promise<BudgetPreset> => {
+  createBudgetPreset: async (portfolioId: string, dto: { name: string; totalCapital: number; budgetYearStart?: string; budgetYearEnd?: string }): Promise<BudgetPreset> => {
     const { data } = await api.post<BudgetPreset>(`/portfolios/${portfolioId}/budget-presets`, dto);
     return data;
   },
 
-  updateBudgetPreset: async (portfolioId: string, presetId: string, dto: { name?: string; totalCapital?: number; strategyReferenceBudget?: number; budgetYearStart?: string; budgetYearEnd?: string }): Promise<BudgetPreset> => {
+  updateBudgetPreset: async (portfolioId: string, presetId: string, dto: { name?: string; totalCapital?: number; budgetYearStart?: string; budgetYearEnd?: string }): Promise<BudgetPreset> => {
     const { data } = await api.patch<BudgetPreset>(`/portfolios/${portfolioId}/budget-presets/${presetId}`, dto);
     return data;
   },
@@ -227,6 +234,10 @@ export const strategyApi = {
     return data;
   },
 
+  upsertStrategyRule: async (portfolioId: string, dto: { symbol: string; dipPercent: number; buyMultiplier: number; weeklyDipMultiplier?: number }): Promise<void> => {
+    await api.put(`/portfolios/${portfolioId}/strategy/rules`, dto);
+  },
+
   approveBuyPlan: async (buyPlanId: string, approved: boolean): Promise<BuyPlan> => {
     const { data } = await api.post<BuyPlan>(`/buy-plans/${buyPlanId}/approve`, { approved });
     return data;
@@ -328,6 +339,28 @@ export const analyticsApi = {
     return data;
   },
 
+  getPortfolioTimeseries: async (
+    portfolioId: string,
+    days: number = 90,
+  ): Promise<PortfolioTimeseries[]> => {
+    const { data } = await api.get<PortfolioTimeseries[]>(
+      `/portfolios/${portfolioId}/analytics/timeseries`,
+      { params: { days } },
+    );
+    return data;
+  },
+
+  getWeeklyTransactions: async (
+    portfolioId: string,
+    weeks: number = 12,
+  ): Promise<PortfolioTimeseries[]> => {
+    const { data } = await api.get<PortfolioTimeseries[]>(
+      `/portfolios/${portfolioId}/analytics/weekly-transactions`,
+      { params: { weeks } },
+    );
+    return data;
+  },
+
   getDipOpportunities: async (portfolioId: string): Promise<DipOpportunity[]> => {
     const { data } = await api.get<DipOpportunity[]>(`/portfolios/${portfolioId}/analytics/dip-opportunities`);
     return data;
@@ -335,6 +368,11 @@ export const analyticsApi = {
 
   getPerformance: async (portfolioId: string, days?: number): Promise<any> => {
     const { data } = await api.get(`/portfolios/${portfolioId}/analytics/performance`, { params: { days } });
+    return data;
+  },
+
+  getAllocationRebalance: async (portfolioId: string): Promise<AllocationRebalance> => {
+    const { data } = await api.get<AllocationRebalance>(`/portfolios/${portfolioId}/analytics/allocation-rebalance`);
     return data;
   },
 };

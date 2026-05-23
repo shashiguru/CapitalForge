@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: '.',
   },
+  async redirects() {
+    return [
+      { source: '/analytics', destination: '/', permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

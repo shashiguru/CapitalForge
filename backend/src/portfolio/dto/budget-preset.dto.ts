@@ -12,12 +12,6 @@ export class CreateBudgetPresetDto {
   totalCapital: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  strategyReferenceBudget?: number;
-
-  @IsOptional()
   budgetYearStart?: string;
 
   @IsOptional()
@@ -37,12 +31,6 @@ export class UpdateBudgetPresetDto {
   totalCapital?: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  strategyReferenceBudget?: number;
-
-  @IsOptional()
   budgetYearStart?: string;
 
   @IsOptional()
@@ -54,7 +42,6 @@ export class BudgetPresetResponseDto {
   portfolioId: string;
   name: string;
   totalCapital: number;
-  strategyReferenceBudget: number | null;
   budgetYearStart: string | null;
   budgetYearEnd: string | null;
   createdAt: Date;

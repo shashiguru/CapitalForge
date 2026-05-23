@@ -108,6 +108,16 @@ export class TransactionFilterDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  pageSize?: number;
 }
 
 export class ImportTransactionDto {
@@ -129,6 +139,10 @@ export class ImportTransactionDto {
   @Type(() => Number)
   @IsNumber()
   fees?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 
   @IsDateString()
   date: string;

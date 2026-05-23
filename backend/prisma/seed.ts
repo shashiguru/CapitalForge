@@ -6,109 +6,44 @@ import * as fs from 'fs';
 
 const prisma = new PrismaClient();
 
-// Strategy rules from user's spreadsheet (Stock, 52w High, dip levels with threshold, buy qty, weekly dip)
+// Predefined strategy: multipliers per stock per dip level (from Excel)
+// VONG is aggressive: 3× at 15%, 5× at 20%, weekly dip trigger at 15%+
+// Others are normal: 1× at 10%/15%, 3× at 20%, 5× at 30%, weekly dip trigger at 30%+
 const PREDEFINED_STRATEGY = [
-  { symbol: 'NVDA', fiftyTwoWeekHigh: 212.19, levels: [
-    { dipPercent: 10, threshold: 190.97, buy: 74, weeklyDip: null },
-    { dipPercent: 15, threshold: 180.36, buy: 74, weeklyDip: null },
-    { dipPercent: 20, threshold: 169.75, buy: 222, weeklyDip: null },
-    { dipPercent: 30, threshold: 148.53, buy: 369, weeklyDip: 74 },
-    { dipPercent: 31, threshold: 148.53, buy: 369, weeklyDip: 74 },
-  ]},
-  { symbol: 'PLTR', fiftyTwoWeekHigh: 207.52, levels: [
-    { dipPercent: 10, threshold: 186.77, buy: 59, weeklyDip: null },
-    { dipPercent: 15, threshold: 176.39, buy: 59, weeklyDip: null },
-    { dipPercent: 20, threshold: 166.02, buy: 177, weeklyDip: null },
-    { dipPercent: 30, threshold: 145.26, buy: 295, weeklyDip: 59 },
-    { dipPercent: 31, threshold: 145.26, buy: 295, weeklyDip: 59 },
-  ]},
-  { symbol: 'SOFI', fiftyTwoWeekHigh: 32.73, levels: [
-    { dipPercent: 10, threshold: 29.46, buy: 44, weeklyDip: null },
-    { dipPercent: 15, threshold: 27.82, buy: 44, weeklyDip: null },
-    { dipPercent: 20, threshold: 26.18, buy: 133, weeklyDip: null },
-    { dipPercent: 30, threshold: 22.91, buy: 222, weeklyDip: 44 },
-    { dipPercent: 31, threshold: 22.91, buy: 222, weeklyDip: 44 },
-  ]},
-  { symbol: 'FTNT', fiftyTwoWeekHigh: 114.82, levels: [
-    { dipPercent: 10, threshold: 103.34, buy: 44, weeklyDip: null },
-    { dipPercent: 15, threshold: 97.60, buy: 44, weeklyDip: null },
-    { dipPercent: 20, threshold: 91.86, buy: 133, weeklyDip: null },
-    { dipPercent: 30, threshold: 80.37, buy: 222, weeklyDip: 44 },
-    { dipPercent: 31, threshold: 80.37, buy: 222, weeklyDip: 44 },
-  ]},
-  { symbol: 'VONG', fiftyTwoWeekHigh: 126.83, levels: [
-    { dipPercent: 10, threshold: 114.15, buy: 74, weeklyDip: null },
-    { dipPercent: 15, threshold: 107.81, buy: 222, weeklyDip: 74 },
-    { dipPercent: 20, threshold: 101.46, buy: 369, weeklyDip: 74 },
-    { dipPercent: 30, threshold: 88.78, buy: 369, weeklyDip: 74 },
-    { dipPercent: 31, threshold: 88.78, buy: 369, weeklyDip: 74 },
-  ]},
+  { symbol: 'NVDA',  fiftyTwoWeekHigh: 212.19, isAggressive: false },
+  { symbol: 'PLTR',  fiftyTwoWeekHigh: 207.52, isAggressive: false },
+  { symbol: 'SOFI',  fiftyTwoWeekHigh: 32.73,  isAggressive: false },
+  { symbol: 'FTNT',  fiftyTwoWeekHigh: 114.82, isAggressive: false },
+  { symbol: 'VONG',  fiftyTwoWeekHigh: 126.83, isAggressive: true  },
+  { symbol: 'GOOGL', fiftyTwoWeekHigh: 207.05, isAggressive: false },
 ];
 
+/** Default multipliers per PRD (Section FR-12) */
+const NORMAL_MULTIPLIERS: Record<number, { buy: number; dip: number }> = {
+  10: { buy: 1, dip: 0 },
+  15: { buy: 1, dip: 0 },
+  20: { buy: 3, dip: 0 },
+  30: { buy: 5, dip: 1 },
+};
+const AGGRESSIVE_MULTIPLIERS: Record<number, { buy: number; dip: number }> = {
+  10: { buy: 1, dip: 0 },
+  15: { buy: 3, dip: 1 },
+  20: { buy: 5, dip: 0 },
+  30: { buy: 5, dip: 1 },
+};
+
 function getPredefinedStrategyRules(portfolioId: string) {
-  const rules: { portfolioId: string; symbol: string; fiftyTwoWeekHigh: number; dipPercent: number; thresholdPrice: number; buyQuantity: number; weeklyDipQuantity: number | null }[] = [];
+  const rules: { portfolioId: string; symbol: string; dipPercent: number; buyMultiplier: number; weeklyDipMultiplier: number }[] = [];
   for (const stock of PREDEFINED_STRATEGY) {
-    for (const level of stock.levels) {
+    const table = stock.isAggressive ? AGGRESSIVE_MULTIPLIERS : NORMAL_MULTIPLIERS;
+    for (const [dipPercent, mults] of Object.entries(table)) {
       rules.push({
         portfolioId,
         symbol: stock.symbol,
-        fiftyTwoWeekHigh: stock.fiftyTwoWeekHigh,
-        dipPercent: level.dipPercent,
-        thresholdPrice: level.threshold,
-        buyQuantity: level.buy,
-        weeklyDipQuantity: level.weeklyDip,
+        dipPercent: parseInt(dipPercent),
+        buyMultiplier: mults.buy,
+        weeklyDipMultiplier: mults.dip,
       });
-    }
-  }
-  return rules;
-}
-
-function getStrategyRulesFromExcel(workbook: XLSX.WorkBook, portfolioId: string): { portfolioId: string; symbol: string; fiftyTwoWeekHigh: number; dipPercent: number; thresholdPrice: number; buyQuantity: number; weeklyDipQuantity: number | null }[] {
-  const strategySheet = workbook.Sheets['Strategy'] || workbook.Sheets['strategy'];
-  if (!strategySheet) return [];
-
-  const data = XLSX.utils.sheet_to_json(strategySheet, { header: 1 }) as any[][];
-  if (!data || data.length < 2) return [];
-
-  // Try to parse Strategy sheet - structure may vary
-  const rules: { portfolioId: string; symbol: string; fiftyTwoWeekHigh: number; dipPercent: number; thresholdPrice: number; buyQuantity: number; weeklyDipQuantity: number | null }[] = [];
-  const header = data[0] as string[];
-
-  // Look for columns: Stock, 52-Week High, and dip level columns
-  const symbolIdx = header.findIndex((h: string) => /stock/i.test(String(h || '')));
-  const high52Idx = header.findIndex((h: string) => /52.*high|high.*52/i.test(String(h || '')));
-
-  if (symbolIdx < 0 || high52Idx < 0) return [];
-
-  for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
-    const row = data[rowIdx];
-    const symbol = row[symbolIdx]?.toString().trim();
-    const fiftyTwoWeekHigh = parseFloat(row[high52Idx] || '0');
-    if (!symbol || !fiftyTwoWeekHigh) continue;
-
-    // Parse dip levels from columns - structure depends on Excel layout
-    const dipLevels = [10, 15, 20, 30, 31];
-    for (let i = 0; i < dipLevels.length; i++) {
-      const dipPercent = dipLevels[i];
-      const thresholdCol = high52Idx + 1 + i * 3; // Approximate: threshold, buy, weeklyDip per level
-      const buyCol = high52Idx + 2 + i * 3;
-      const weeklyDipCol = high52Idx + 3 + i * 3;
-
-      const threshold = parseFloat(row[thresholdCol] || '0') || fiftyTwoWeekHigh * (1 - dipPercent / 100);
-      const buy = parseInt(row[buyCol] || '0', 10);
-      const weeklyDip = row[weeklyDipCol] === 'NA' || row[weeklyDipCol] === '' ? null : parseInt(row[weeklyDipCol] || '0', 10) || null;
-
-      if (buy > 0) {
-        rules.push({
-          portfolioId,
-          symbol: symbol.toUpperCase(),
-          fiftyTwoWeekHigh,
-          dipPercent,
-          thresholdPrice: threshold,
-          buyQuantity: buy,
-          weeklyDipQuantity: weeklyDip,
-        });
-      }
     }
   }
   return rules;
@@ -178,15 +113,17 @@ async function main() {
     const allocationsData = XLSX.utils.sheet_to_json(allocationsSheet) as any[];
     const totalCapital = allocationsData[0]?.['Total (USD)'] ?? allocationsData[0]?.['Total (USD) '] ?? 23639;
     
-    // Create portfolio (strategyReferenceBudget = budget strategy was designed for; used for scaling when totalCapital changes)
     const portfolio = await prisma.portfolio.create({
       data: {
         userId: user.id,
         name: 'My Portfolio',
         description: 'Real portfolio imported from Excel',
         totalCapital: totalCapital,
-        strategyReferenceBudget: totalCapital, // strategy designed for this budget
         currency: 'USD',
+        coreRatio: 0.60,
+        dipRatio: 0.30,
+        crashRatio: 0.10,
+        dcaWeeksPerYear: 48,
       },
     });
     console.log(`✓ Created portfolio: ${portfolio.name} ($${totalCapital.toLocaleString()})\n`);
@@ -200,19 +137,26 @@ async function main() {
       const targetPercentage = parseFloat(row['Allocation(%)'] ?? row['Allocation (%)'] ?? '0');
       if (!symbol || isNaN(targetPercentage) || targetPercentage <= 0) continue;
 
+      const symUpper = symbol.toUpperCase();
       const allocationUSD = (totalCapital * targetPercentage) / 100;
-      const coreBucketUSD = allocationUSD * 0.6;
-      const dipBucketUSD = allocationUSD * 0.4;
-      const crashBucketUSD = allocationUSD * 0;
+      const coreBucketUSD = allocationUSD * 0.60;
+      const dipBucketUSD = allocationUSD * 0.30;
+      const crashBucketUSD = allocationUSD * 0.10;
       const monthlyDCA = coreBucketUSD / 12;
       const weeklyDCA = coreBucketUSD / 48;
+
+      // Look up 52-week high and isAggressive from predefined strategy
+      const predefined = PREDEFINED_STRATEGY.find((s) => s.symbol === symUpper);
 
       await prisma.allocation.create({
         data: {
           portfolioId: portfolio.id,
-          symbol: symbol.toUpperCase(),
+          symbol: symUpper,
           companyName: null,
           targetPercentage: targetPercentage,
+          isAggressive: predefined?.isAggressive ?? false,
+          fiftyTwoWeekHigh: predefined?.fiftyTwoWeekHigh ?? null,
+          fiftyTwoWeekHighUpdatedAt: predefined?.fiftyTwoWeekHigh ? new Date() : null,
           allocationUSD,
           coreBucketUSD,
           dipBucketUSD,
@@ -390,19 +334,11 @@ async function main() {
     });
     console.log('✓ Created global config');
 
-    // ========== Import Strategy Rules (from Strategy sheet / predefined) ==========
+    // ========== Import Strategy Rules (multiplier-based) ==========
     console.log('Importing strategy rules...');
-    const strategyRules = getStrategyRulesFromExcel(workbook, portfolio.id);
-    if (strategyRules.length > 0) {
-      await prisma.strategyRule.createMany({ data: strategyRules });
-      console.log(`✓ Created ${strategyRules.length} strategy rules`);
-    } else {
-      // Fallback: use predefined strategy from user's spreadsheet
-      const predefinedRules = getPredefinedStrategyRules(portfolio.id);
-      await prisma.strategyRule.createMany({ data: predefinedRules });
-      console.log(`✓ Created ${predefinedRules.length} predefined strategy rules`);
-    }
-    console.log('');
+    const predefinedRules = getPredefinedStrategyRules(portfolio.id);
+    await prisma.strategyRule.createMany({ data: predefinedRules, skipDuplicates: true });
+    console.log(`✓ Created ${predefinedRules.length} strategy rules`);
 
     console.log('\n========================================');
     console.log('Excel import completed successfully!');
@@ -443,8 +379,11 @@ async function seedDemoData() {
       name: 'Tech Growth Portfolio',
       description: 'Demo portfolio with sample allocations',
       totalCapital: 100000,
-      strategyReferenceBudget: 100000,
       currency: 'USD',
+      coreRatio: 0.60,
+      dipRatio: 0.30,
+      crashRatio: 0.10,
+      dcaWeeksPerYear: 48,
     },
   });
   console.log('✓ Created portfolio:', portfolio.name);
@@ -462,9 +401,9 @@ async function seedDemoData() {
 
   for (const alloc of demoAllocations) {
     const allocationUSD = (Number(portfolio.totalCapital) * alloc.targetPercentage) / 100;
-    const coreBucketUSD = allocationUSD * 0.6;
-    const dipBucketUSD = allocationUSD * 0.4;
-    const crashBucketUSD = allocationUSD * 0;
+    const coreBucketUSD = allocationUSD * 0.60;
+    const dipBucketUSD = allocationUSD * 0.30;
+    const crashBucketUSD = allocationUSD * 0.10;
     const monthlyDCA = coreBucketUSD / 12;
     const weeklyDCA = coreBucketUSD / 48;
 

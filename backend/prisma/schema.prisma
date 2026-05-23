@@ -21,20 +21,26 @@ model User {
 }
 
 model Portfolio {
-  id                      String             @id @default(uuid())
-  userId                  String
-  name                    String
-  description             String?
-  totalCapital            Decimal            @default(0) @db.Decimal(18, 2)
-  strategyReferenceBudget Decimal?           @db.Decimal(18, 2) // yearly budget the strategy was designed for; when set, amounts scale by totalCapital/this
-  budgetYearStart         DateTime?          @db.Date    // start of budget period (e.g. Jan 1)
-  budgetYearEnd           DateTime?          @db.Date    // end of budget period (e.g. Dec 31)
-  currency                String             @default("USD")
-  isActive                Boolean            @default(true)
+  id              String    @id @default(uuid())
+  userId          String
+  name            String
+  description     String?
+  totalCapital    Decimal   @default(0) @db.Decimal(18, 2)
+  budgetYearStart DateTime? @db.Date
+  budgetYearEnd   DateTime? @db.Date
+  currency        String    @default("USD")
+  // Bucket ratios — must sum to 1.0
+  coreRatio       Decimal   @default(0.60) @db.Decimal(5, 4)
+  dipRatio        Decimal   @default(0.30) @db.Decimal(5, 4)
+  crashRatio      Decimal   @default(0.10) @db.Decimal(5, 4)
+  // How many DCA weeks per year (Excel uses 48, not 52)
+  dcaWeeksPerYear Int       @default(48)
+  isActive        Boolean   @default(true)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   allocations       Allocation[]
   coreStocks        CoreStock[]
+  investors         Investor[]
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   strategySnapshots StrategySnapshot[]
   strategyRules     StrategyRule[]
@@ -47,15 +53,14 @@ model Portfolio {
 }
 
 model BudgetPreset {
-  id                      String    @id @default(uuid())
-  portfolioId             String
-  name                    String
-  totalCapital            Decimal   @db.Decimal(18, 2)
-  strategyReferenceBudget Decimal? @db.Decimal(18, 2)
-  budgetYearStart         DateTime? @db.Date
-  budgetYearEnd           DateTime? @db.Date
-  createdAt               DateTime @default(now())
-  portfolio               Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  id              String    @id @default(uuid())
+  portfolioId     String
+  name            String
+  totalCapital    Decimal   @db.Decimal(18, 2)
+  budgetYearStart DateTime? @db.Date
+  budgetYearEnd   DateTime? @db.Date
+  createdAt       DateTime  @default(now())
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@index([portfolioId])
   @@map("budget_presets")
@@ -76,15 +81,15 @@ model CoreStock {
 }
 
 model StrategyRule {
-  id                String    @id @default(uuid())
-  portfolioId       String
-  symbol            String
-  fiftyTwoWeekHigh  Decimal   @db.Decimal(18, 4)
-  dipPercent        Int       // 10, 15, 20, 30, 31 (31 = more than 30%)
-  thresholdPrice    Decimal   @db.Decimal(18, 4)
-  buyQuantity       Int       // shares to buy at this dip level
-  weeklyDipQuantity Int?      // shares for weekly dip (null = NA)
-  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  id                   String    @id @default(uuid())
+  portfolioId          String
+  symbol               String
+  dipPercent           Int       // 10, 15, 20, 30 (thresholds from 52wHigh)
+  // Multiplier applied to weeklyDCA: 1, 3, or 5
+  buyMultiplier        Int       @default(1)
+  // 1 = weekly dip trigger active at this level; 0 = no trigger
+  weeklyDipMultiplier  Int       @default(0)
+  portfolio            Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, symbol, dipPercent])
   @@index([portfolioId])
@@ -93,30 +98,41 @@ model StrategyRule {
 }
 
 model Allocation {
-  id                String    @id @default(uuid())
-  portfolioId       String
-  symbol            String
-  companyName       String?
-  targetPercentage  Decimal   @db.Decimal(5, 2)
-  allocationUSD     Decimal   @default(0) @db.Decimal(18, 2)
-  coreBucketUSD     Decimal   @default(0) @db.Decimal(18, 2)
-  dipBucketUSD      Decimal   @default(0) @db.Decimal(18, 2)
-  crashBucketUSD    Decimal   @default(0) @db.Decimal(18, 2)
-  monthlyDCA        Decimal   @default(0) @db.Decimal(18, 2)
-  weeklyDCA         Decimal   @default(0) @db.Decimal(18, 2)
-  coreUsedUSD       Decimal   @default(0) @db.Decimal(18, 2)
-  dipUsedUSD        Decimal   @default(0) @db.Decimal(18, 2)
-  crashUsedUSD      Decimal   @default(0) @db.Decimal(18, 2)
-  coreRemainingUSD  Decimal   @default(0) @db.Decimal(18, 2)
-  dipRemainingUSD   Decimal   @default(0) @db.Decimal(18, 2)
-  crashRemainingUSD Decimal   @default(0) @db.Decimal(18, 2)
-  sharesOwned       Decimal   @default(0) @db.Decimal(18, 6)
-  avgCostBasis      Decimal   @default(0) @db.Decimal(18, 4)
-  investedValue     Decimal   @default(0) @db.Decimal(18, 2)
-  isActive          Boolean   @default(true)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  id                    String    @id @default(uuid())
+  portfolioId           String
+  symbol                String
+  companyName           String?
+  targetPercentage      Decimal   @db.Decimal(5, 2)
+  // Whether to use aggressive multipliers (e.g. VONG ETF: 3× at 15%, 5× at 20%)
+  isAggressive          Boolean   @default(false)
+  // Reference high for threshold calculations (manually set, not auto-updated)
+  fiftyTwoWeekHigh      Decimal?  @db.Decimal(18, 4)
+  fiftyTwoWeekHighUpdatedAt DateTime?
+  // Computed allocation fields (recalculated when budget/ratios change)
+  allocationUSD         Decimal   @default(0) @db.Decimal(18, 2)
+  coreBucketUSD         Decimal   @default(0) @db.Decimal(18, 2)
+  dipBucketUSD          Decimal   @default(0) @db.Decimal(18, 2)
+  crashBucketUSD        Decimal   @default(0) @db.Decimal(18, 2)
+  monthlyDCA            Decimal   @default(0) @db.Decimal(18, 2)
+  weeklyDCA             Decimal   @default(0) @db.Decimal(18, 2)
+  // Bucket usage tracking
+  coreUsedUSD           Decimal   @default(0) @db.Decimal(18, 2)
+  dipUsedUSD            Decimal   @default(0) @db.Decimal(18, 2)
+  crashUsedUSD          Decimal   @default(0) @db.Decimal(18, 2)
+  coreRemainingUSD      Decimal   @default(0) @db.Decimal(18, 2)
+  dipRemainingUSD       Decimal   @default(0) @db.Decimal(18, 2)
+  crashRemainingUSD     Decimal   @default(0) @db.Decimal(18, 2)
+  // Position tracking
+  sharesOwned           Decimal   @default(0) @db.Decimal(18, 6)
+  avgCostBasis          Decimal   @default(0) @db.Decimal(18, 4)
+  investedValue         Decimal   @default(0) @db.Decimal(18, 2)
+  // Intra-week dip trigger tracking
+  lastWeeklyBuyPrice    Decimal?  @db.Decimal(18, 4)
+  lastWeeklyBuyDate     DateTime? @db.Date
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  portfolio             Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, symbol])
   @@index([portfolioId])
@@ -236,6 +252,19 @@ model GlobalConfig {
   updatedAt DateTime @updatedAt
 
   @@map("global_config")
+}
+
+model Investor {
+  id                 String    @id @default(uuid())
+  portfolioId        String
+  name               String
+  contributionAmount Decimal   @default(0) @db.Decimal(18, 2)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  portfolio          Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
+  @@map("investors")
 }
 
 enum TransactionType {

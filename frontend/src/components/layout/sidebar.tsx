@@ -9,10 +9,10 @@ import {
   Target,
   DollarSign,
   History,
-  BarChart3,
   Settings,
   LogOut,
   Wallet,
+  BarChart2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
@@ -22,9 +22,9 @@ export const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Allocation', href: '/allocation', icon: PieChart },
   { name: 'Strategy', href: '/strategy', icon: Target },
+  { name: 'Analytics', href: '/analytics', icon: BarChart2 },
   { name: 'Budget', href: '/budget', icon: DollarSign },
   { name: 'Transactions', href: '/transactions', icon: History },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
 ];
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

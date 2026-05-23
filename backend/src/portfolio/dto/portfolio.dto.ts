@@ -3,8 +3,10 @@ import {
   IsOptional,
   IsNumber,
   Min,
+  Max,
   MaxLength,
   IsBoolean,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -25,13 +27,7 @@ export class CreatePortfolioDto {
   totalCapital?: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  strategyReferenceBudget?: number;
-
-  @IsOptional()
-  budgetYearStart?: string; // ISO date YYYY-MM-DD
+  budgetYearStart?: string;
 
   @IsOptional()
   budgetYearEnd?: string;
@@ -40,6 +36,34 @@ export class CreatePortfolioDto {
   @IsString()
   @MaxLength(10)
   currency?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  coreRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  dipRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  crashRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(52)
+  dcaWeeksPerYear?: number;
 }
 
 export class UpdatePortfolioDto {
@@ -60,12 +84,6 @@ export class UpdatePortfolioDto {
   totalCapital?: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  strategyReferenceBudget?: number;
-
-  @IsOptional()
   budgetYearStart?: string;
 
   @IsOptional()
@@ -79,6 +97,34 @@ export class UpdatePortfolioDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  coreRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  dipRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  crashRatio?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(52)
+  dcaWeeksPerYear?: number;
 }
 
 export class PortfolioResponseDto {
@@ -87,10 +133,13 @@ export class PortfolioResponseDto {
   name: string;
   description: string | null;
   totalCapital: number;
-  strategyReferenceBudget: number | null;
   budgetYearStart: string | null;
   budgetYearEnd: string | null;
   currency: string;
+  coreRatio: number;
+  dipRatio: number;
+  crashRatio: number;
+  dcaWeeksPerYear: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
