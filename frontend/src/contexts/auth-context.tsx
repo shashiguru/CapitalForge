@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     localStorage.removeItem('token');
     setUser(null);
-    router.push('/login');
+    router.push('/auth/login');
   };
 
   const updateProfile = async (dto: { name?: string; currentPassword?: string; newPassword?: string }) => {
