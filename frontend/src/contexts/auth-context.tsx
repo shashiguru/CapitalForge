@@ -17,6 +17,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Store user data in sessionStorage so it persists during page navigations
+const STORAGE_KEY = 'cf_user';
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,25 +28,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Check if token exists in localStorage
+        // Check if we have a token
         const token = localStorage.getItem('token');
         console.log('[Auth] Initializing... Token found:', !!token);
         
         if (!token) {
-          console.log('[Auth] No token found, setting isLoading=false');
+          console.log('[Auth] No token found');
           setIsLoading(false);
           return;
         }
 
-        // Try to validate token by fetching profile
+        // Check if we have cached user data from sessionStorage
+        const cachedUserStr = sessionStorage.getItem(STORAGE_KEY);
+        if (cachedUserStr) {
+          try {
+            const cachedUser = JSON.parse(cachedUserStr);
+            console.log('[Auth] Restoring user from session:', cachedUser.email);
+            setUser(cachedUser);
+            setIsLoading(false);
+            return;
+          } catch (e) {
+            console.error('[Auth] Failed to parse cached user');
+          }
+        }
+
+        // No cached user, try to fetch profile
         try {
           const profile = await authApi.getProfile();
-          console.log('[Auth] Profile fetched successfully:', profile);
+          console.log('[Auth] Profile fetched successfully:', profile.email);
           setUser(profile);
-        } catch (profileError) {
-          console.error('[Auth] Profile fetch failed, but token exists:', profileError);
-          // Profile fetch failed - this could mean the token is invalid
-          // or the backend is down. Clear the token to be safe.
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+        } catch (profileError: any) {
+          console.error('[Auth] Profile fetch failed:', profileError.message);
+          // Token might be invalid, clear it
           localStorage.removeItem('token');
           setUser(null);
         }
@@ -60,11 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await authApi.login(credentials);
       localStorage.setItem('token', response.accessToken);
       const userData = response.user as AppUser;
-      console.log('[Auth] Login successful, setting user:', userData);
+      console.log('[Auth] Login successful:', userData.email);
       setUser(userData);
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
       return true;
     } catch (error: any) {
-      console.error('[Auth] Login failed:', error);
+      console.error('[Auth] Login failed:', error.message);
       throw new Error(error.response?.data?.message || 'Login failed');
     }
   };
@@ -74,15 +92,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await authApi.register(credentials);
       localStorage.setItem('token', response.accessToken);
       const userData = response.user as AppUser;
+      console.log('[Auth] Register successful:', userData.email);
       setUser(userData);
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
       return true;
     } catch (error: any) {
+      console.error('[Auth] Register failed:', error.message);
       throw new Error(error.response?.data?.message || 'Registration failed');
     }
   };
 
   const logout = async () => {
     localStorage.removeItem('token');
+    sessionStorage.removeItem(STORAGE_KEY);
     setUser(null);
     router.push('/auth/login');
   };
@@ -90,6 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (dto: { name?: string; currentPassword?: string; newPassword?: string }) => {
     const updated = await authApi.updateProfile(dto);
     setUser(updated);
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   };
 
   return (

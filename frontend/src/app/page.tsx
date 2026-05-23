@@ -5,7 +5,6 @@ import { usePortfolio } from '@/contexts/portfolio-context';
 import { useAuth } from '@/contexts/auth-context';
 import { analyticsApi, budgetApi, portfolioApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
-import { ProtectedRoute } from '@/components/protected-route';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   PieChart,
@@ -56,11 +55,7 @@ const DIP_LEVEL_SHORT: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-  return (
-    <ProtectedRoute>
-      <DashboardContent />
-    </ProtectedRoute>
-  );
+  return <DashboardContent />;
 }
 
 function DashboardContent() {
