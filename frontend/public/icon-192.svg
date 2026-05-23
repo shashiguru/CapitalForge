@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" fill="#3B82F6"/>
+  <circle cx="96" cy="60" r="28" fill="#ffffff" opacity="0.9"/>
+  <path d="M 96 100 L 130 140 L 62 140 Z" fill="#ffffff" opacity="0.9"/>
+  <text x="96" y="170" font-size="16" font-weight="bold" fill="#ffffff" text-anchor="middle">CF</text>
+</svg>
