@@ -11,6 +11,7 @@ import { BudgetModule } from './budget/budget.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CoreStockModule } from './core-stock/core-stock.module';
+import { AdminModule } from './admin/admin.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
@@ -22,6 +23,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     }),
     PrismaModule,
     AuthModule,
+    AdminModule,
     PortfolioModule,
     AllocationModule,
     MarketDataModule,
