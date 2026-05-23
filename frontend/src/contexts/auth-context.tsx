@@ -30,19 +30,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('[Auth] Initializing... Token found:', !!token);
         
         if (!token) {
+          console.log('[Auth] No token found, setting isLoading=false');
           setIsLoading(false);
           return;
         }
 
         // Try to validate token by fetching profile
-        const profile = await authApi.getProfile();
-        console.log('[Auth] Profile fetched:', profile);
-        setUser(profile);
-      } catch (error) {
-        console.error('[Auth] Profile fetch failed:', error);
-        // Token is invalid or expired - clear it
-        localStorage.removeItem('token');
-        setUser(null);
+        try {
+          const profile = await authApi.getProfile();
+          console.log('[Auth] Profile fetched successfully:', profile);
+          setUser(profile);
+        } catch (profileError) {
+          console.error('[Auth] Profile fetch failed, but token exists:', profileError);
+          // Profile fetch failed - this could mean the token is invalid
+          // or the backend is down. Clear the token to be safe.
+          localStorage.removeItem('token');
+          setUser(null);
+        }
       } finally {
         setIsLoading(false);
       }
