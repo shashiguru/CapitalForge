@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         // Check if token exists in localStorage
         const token = localStorage.getItem('token');
+        console.log('[Auth] Initializing... Token found:', !!token);
         
         if (!token) {
           setIsLoading(false);
@@ -35,8 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Try to validate token by fetching profile
         const profile = await authApi.getProfile();
+        console.log('[Auth] Profile fetched:', profile);
         setUser(profile);
       } catch (error) {
+        console.error('[Auth] Profile fetch failed:', error);
         // Token is invalid or expired - clear it
         localStorage.removeItem('token');
         setUser(null);
@@ -53,9 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await authApi.login(credentials);
       localStorage.setItem('token', response.accessToken);
       const userData = response.user as AppUser;
+      console.log('[Auth] Login successful, setting user:', userData);
       setUser(userData);
       return true;
     } catch (error: any) {
+      console.error('[Auth] Login failed:', error);
       throw new Error(error.response?.data?.message || 'Login failed');
     }
   };
