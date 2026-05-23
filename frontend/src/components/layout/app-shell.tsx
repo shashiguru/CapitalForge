@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TopNav } from './header';
+import { BottomTabBar } from './bottom-tab-bar';
 import { useAuth } from '@/contexts/auth-context';
 import { usePortfolio } from '@/contexts/portfolio-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -47,9 +48,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopNav />
-      <main className="flex-1 w-full px-8 py-8">
+      {/* pb-20 on mobile leaves space for the bottom tab bar */}
+      <main className="flex-1 w-full px-4 md:px-8 py-6 pb-24 md:pb-8">
         {children}
       </main>
+      <BottomTabBar />
     </div>
   );
 }
