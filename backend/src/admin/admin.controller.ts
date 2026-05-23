@@ -1,5 +1,4 @@
 import { Controller, Post, HttpCode, HttpStatus } from '@nestjs/common';
-import { Public } from '../auth/decorators/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
@@ -7,7 +6,6 @@ import * as bcrypt from 'bcrypt';
 export class AdminController {
   constructor(private prisma: PrismaService) {}
 
-  @Public()
   @Post('seed')
   @HttpCode(HttpStatus.OK)
   async seed() {
