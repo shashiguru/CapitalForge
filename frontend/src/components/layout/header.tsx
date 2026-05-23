@@ -62,9 +62,7 @@ export function TopNav() {
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-card border-b border-border"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
-    >
+    <header className="sticky top-0 z-40 bg-card border-b border-border">
       <div className="px-4 md:px-8 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-1.5 shrink-0">
