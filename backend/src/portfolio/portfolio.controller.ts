@@ -4,6 +4,7 @@ import {
   Post,
   Patch,
   Delete,
+  Put,
   Body,
   Param,
   HttpCode,
@@ -17,6 +18,7 @@ import {
   PortfolioSummaryDto,
 } from './dto/portfolio.dto';
 import { CreateBudgetPresetDto, UpdateBudgetPresetDto } from './dto/budget-preset.dto';
+import { SaveBudgetPresetCompositionDto } from './dto/budget-preset-composition.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('portfolios')
@@ -59,6 +61,25 @@ export class PortfolioController {
     @CurrentUser('id') userId: string,
   ) {
     return this.portfolioService.applyBudgetPreset(id, presetId, userId);
+  }
+
+  @Get(':id/budget-presets/:presetId/composition')
+  async getBudgetPresetComposition(
+    @Param('id') id: string,
+    @Param('presetId') presetId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.portfolioService.getBudgetPresetComposition(id, presetId, userId);
+  }
+
+  @Put(':id/budget-presets/:presetId/composition')
+  async saveBudgetPresetComposition(
+    @Param('id') id: string,
+    @Param('presetId') presetId: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: SaveBudgetPresetCompositionDto,
+  ) {
+    return this.portfolioService.saveBudgetPresetComposition(id, presetId, userId, dto);
   }
 
   @Delete(':id/budget-presets/:presetId')

@@ -8,6 +8,7 @@ interface PortfolioContextType {
   portfolios: Portfolio[];
   selectedPortfolio: Portfolio | null;
   isLoading: boolean;
+  hasFetched: boolean;
   error: string | null;
   fetchPortfolios: () => Promise<void>;
   selectPortfolio: (portfolio: Portfolio | null) => void;
@@ -23,6 +24,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPortfolios = useCallback(async () => {
@@ -31,17 +33,21 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     try {
       const data = await portfolioApi.getAll();
       setPortfolios(data);
-      
-      // Auto-select first portfolio if none selected
-      if (data.length > 0 && !selectedPortfolio) {
-        setSelectedPortfolio(data[0]);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch portfolios');
+
+      setSelectedPortfolio((prev) => {
+        if (prev && data.some((p) => p.id === prev.id)) {
+          return data.find((p) => p.id === prev!.id) ?? data[0] ?? null;
+        }
+        return data.length > 0 ? data[0] : null;
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch portfolios';
+      setError(message);
     } finally {
       setIsLoading(false);
+      setHasFetched(true);
     }
-  }, [selectedPortfolio]);
+  }, []);
 
   const selectPortfolio = (portfolio: Portfolio | null) => {
     setSelectedPortfolio(portfolio);
@@ -77,6 +83,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         portfolios,
         selectedPortfolio,
         isLoading,
+        hasFetched,
         error,
         fetchPortfolios,
         selectPortfolio,

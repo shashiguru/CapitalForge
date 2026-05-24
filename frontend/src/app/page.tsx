@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { usePortfolio } from '@/contexts/portfolio-context';
-import { useAuth } from '@/contexts/auth-context';
-import { analyticsApi, budgetApi, portfolioApi } from '@/lib/api';
+import { analyticsApi, portfolioApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
+import { PageHeader } from '@/components/layout/page-header';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   PieChart,
@@ -20,7 +20,6 @@ import {
 } from 'recharts';
 import type {
   PortfolioAnalytics,
-  WeeklyBudget,
   DipOpportunity,
   BudgetPreset,
   AllocationChartData,
@@ -61,7 +60,6 @@ export default function DashboardPage() {
 function DashboardContent() {
   const { selectedPortfolio } = usePortfolio();
   const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
-  const [budget, setBudget] = useState<WeeklyBudget | null>(null);
   const [opportunities, setOpportunities] = useState<DipOpportunity[]>([]);
   const [chartData, setChartData] = useState<AllocationChartData[]>([]);
   const [weeklyTxData, setWeeklyTxData] = useState<PortfolioTimeseries[]>([]);
@@ -73,17 +71,15 @@ function DashboardContent() {
       if (!selectedPortfolio) return;
       setIsLoading(true);
       try {
-        const [analyticsData, budgetData, oppsData, chartRes, weeklyRes, presetsData] =
+        const [analyticsData, oppsData, chartRes, weeklyRes, presetsData] =
           await Promise.all([
             analyticsApi.getPortfolioAnalytics(selectedPortfolio.id),
-            budgetApi.getCurrent(selectedPortfolio.id),
             analyticsApi.getDipOpportunities(selectedPortfolio.id),
             analyticsApi.getAllocationChartData(selectedPortfolio.id),
             analyticsApi.getWeeklyTransactions(selectedPortfolio.id, 12).catch(() => []),
             portfolioApi.getBudgetPresets(selectedPortfolio.id).catch(() => []),
           ]);
         setAnalytics(analyticsData as unknown as PortfolioAnalytics);
-        setBudget(budgetData);
         setOpportunities(oppsData as unknown as DipOpportunity[]);
         setChartData(chartRes as unknown as AllocationChartData[]);
         setWeeklyTxData(Array.isArray(weeklyRes) ? weeklyRes : []);
@@ -97,10 +93,18 @@ function DashboardContent() {
     fetchData();
   }, [selectedPortfolio]);
 
-  const year = selectedPortfolio?.budgetYearStart
-    ? new Date(selectedPortfolio.budgetYearStart).getFullYear()
-    : new Date().getFullYear();
-
+  const currentBudget = selectedPortfolio?.totalCapital ?? analytics?.totalCapital ?? 0;
+  const sortedBudgetPresets = [...budgetPresets].sort((a, b) =>
+    (a.budgetYearStart ?? a.name).localeCompare(b.budgetYearStart ?? b.name),
+  );
+  const lifetimeBudgetTotal =
+    sortedBudgetPresets.length > 0
+      ? sortedBudgetPresets.reduce((s, p) => s + p.totalCapital, 0)
+      : currentBudget;
+  const targetProgress =
+    lifetimeBudgetTotal > 0
+      ? ((analytics?.totalInvested ?? 0) / lifetimeBudgetTotal) * 100
+      : 0;
   const dipsBySymbol = Object.fromEntries(opportunities.map((o) => [o.symbol, o]));
   const weeklyDCATotal = analytics?.holdings?.reduce((s, h) => s + (h.weeklyDCA ?? 0), 0) ?? 0;
   const dcaWeeks = selectedPortfolio?.dcaWeeksPerYear ?? 48;
@@ -120,51 +124,59 @@ function DashboardContent() {
 
   return (
     <AppShell>
-      {/* ─── Page Header ─── */}
-      <div className="mb-8">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="label-caps mb-1">Portfolio · {year} Fiscal Year</p>
-            <h1 className="text-5xl font-serif font-normal text-foreground leading-tight">
-              Portfolio Dashboard
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {selectedPortfolio.name} · CapitalForge Strategy Engine
-            </p>
-          </div>
-
-          {/* Investor contribution widgets */}
-          {budgetPresets.length > 0 && (
+      <PageHeader
+        eyebrow="Portfolio · All Time"
+        title="Portfolio Dashboard"
+        titleSize="large"
+        subtitle={`${selectedPortfolio.name} · All-time performance & current positions`}
+        actions={
+          sortedBudgetPresets.length > 0 ? (
             <div className="hidden md:flex items-center gap-6 pt-2">
-              {budgetPresets.slice(0, 2).map((preset) => (
+              {sortedBudgetPresets.map((preset) => (
                 <div key={preset.id} className="text-right">
                   <p className="label-caps">{preset.name}</p>
-                  <p className="text-lg font-semibold tabular-nums">
-                    {usd(preset.totalCapital)}
-                  </p>
+                  <p className="text-lg font-semibold tabular-nums">{usd(preset.totalCapital)}</p>
                 </div>
               ))}
             </div>
-          )}
+          ) : currentBudget > 0 ? (
+            <div className="hidden md:flex items-center gap-6 pt-2">
+              <div className="text-right">
+                <p className="label-caps">Current Budget</p>
+                <p className="text-lg font-semibold tabular-nums">{usd(currentBudget)}</p>
+              </div>
+            </div>
+          ) : undefined
+        }
+      />
+
+      {sortedBudgetPresets.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 mb-4 md:hidden">
+          {sortedBudgetPresets.map((preset) => (
+            <div key={preset.id} className="bg-card border border-border rounded-sm p-3">
+              <p className="label-caps mb-1 text-[10px]">{preset.name}</p>
+              <p className="text-xl font-serif tabular-nums">{usd(preset.totalCapital)}</p>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
       {/* ─── Three stat cards ─── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
         {/* Total Portfolio Value */}
-        <div className="bg-card border border-border rounded-sm p-5">
-          <p className="label-caps mb-3">Total Portfolio Value</p>
+        <div className="bg-card border border-border rounded-sm p-4">
+          <p className="label-caps mb-2">Total Portfolio Value</p>
           {isLoading ? (
-            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-8 w-24" />
           ) : (
             <>
-              <div className="flex items-baseline gap-2">
-                <span className="text-4xl font-serif font-normal tabular-nums">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span className="text-2xl md:text-4xl font-serif font-normal tabular-nums">
                   {usd(analytics?.totalCurrentValue ?? 0)}
                 </span>
                 <span
                   className={cn(
-                    'text-xs font-semibold px-1.5 py-0.5 rounded',
+                    'text-[10px] md:text-xs font-semibold px-1.5 py-0.5 rounded',
                     (analytics?.totalUnrealizedPnLPercent ?? 0) >= 0
                       ? 'bg-emerald-100 text-emerald-700'
                       : 'bg-red-100 text-red-700'
@@ -173,7 +185,7 @@ function DashboardContent() {
                   {pctStr(analytics?.totalUnrealizedPnLPercent ?? 0)}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-[11px] md:text-sm text-muted-foreground mt-1">
                 Unrealized P&L:{' '}
                 <span
                   className={cn(
@@ -189,47 +201,53 @@ function DashboardContent() {
           )}
         </div>
 
-        {/* Capital Deployment */}
-        <div className="bg-card border border-border rounded-sm p-5">
-          <p className="label-caps mb-3">Capital Deployment</p>
+        {/* All-Time Invested */}
+        <div className="bg-card border border-border rounded-sm p-4">
+          <p className="label-caps mb-2">All-Time Invested</p>
           {isLoading ? (
-            <Skeleton className="h-10 w-32" />
+            <Skeleton className="h-8 w-24" />
           ) : (
             <>
-              <span className="text-4xl font-serif font-normal tabular-nums">
+              <span className="text-2xl md:text-4xl font-serif font-normal tabular-nums">
                 {usd(analytics?.totalInvested ?? 0)}
               </span>
-              <div className="mt-3 space-y-1">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Budget Deployed</span>
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between text-[11px] md:text-xs text-muted-foreground">
+                  <span>Of Total Budget</span>
                   <span className="font-semibold text-foreground">
-                    {analytics?.investedPercent?.toFixed(1) ?? 0}%
+                    {targetProgress.toFixed(1)}%
                   </span>
                 </div>
                 <div className="h-1.5 bg-border rounded-full overflow-hidden">
                   <div
                     className="h-full bg-foreground rounded-full transition-all"
-                    style={{ width: `${Math.min(analytics?.investedPercent ?? 0, 100)}%` }}
+                    style={{ width: `${Math.min(targetProgress, 100)}%` }}
                   />
                 </div>
+                <p className="text-[10px] md:text-xs text-muted-foreground">
+                  Total budget {usd(lifetimeBudgetTotal)}
+                  {sortedBudgetPresets.length > 1
+                    ? ` · ${sortedBudgetPresets.map((p) => usd(p.totalCapital)).join(' + ')}`
+                    : ''}
+                </p>
               </div>
             </>
           )}
         </div>
 
         {/* Weekly DCA Target */}
-        <div className="bg-foreground text-background rounded-sm p-5">
-          <p className="text-[10px] font-semibold tracking-widest uppercase text-background/60 mb-3">
+        <div className="col-span-2 md:col-span-1 bg-foreground text-background rounded-sm p-4">
+          <p className="text-[10px] font-semibold tracking-widest uppercase text-background/60 mb-2">
             Weekly DCA Target
           </p>
           {isLoading ? (
-            <Skeleton className="h-10 w-32 bg-background/20" />
+            <Skeleton className="h-8 w-24 bg-background/20" />
           ) : (
             <>
-              <span className="text-4xl font-serif font-normal tabular-nums">
+              <span className="text-2xl md:text-4xl font-serif font-normal tabular-nums">
                 {usd2(weeklyDCATotal)}
               </span>
-              <p className="text-xs text-background/60 mt-2 uppercase tracking-wide">
+              <p className="text-[11px] md:text-xs text-background/60 mt-1 uppercase tracking-wide">
                 {dcaWeeks} Weeks · Per Year Pace
               </p>
             </>
@@ -241,8 +259,8 @@ function DashboardContent() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         {/* Holdings Table */}
         <div className="bg-card border border-border rounded-sm">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <h2 className="text-base font-semibold">Holdings</h2>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border md:px-5 md:py-4">
+            <h2 className="text-sm md:text-base font-semibold">Holdings</h2>
             <span className="label-caps">
               {analytics?.holdings?.length ?? 0} active positions
             </span>
@@ -255,7 +273,7 @@ function DashboardContent() {
                     <th
                       key={h}
                       className={cn(
-                        'py-2.5 px-5 label-caps text-left',
+                        'py-2 px-3 md:py-2.5 md:px-5 label-caps text-left',
                         h !== 'SYMBOL' && 'text-right'
                       )}
                     >
@@ -268,7 +286,7 @@ function DashboardContent() {
                 {isLoading
                   ? [1, 2, 3, 4, 5].map((i) => (
                       <tr key={i} className="border-b border-border">
-                        <td colSpan={7} className="px-5 py-3">
+                        <td colSpan={7} className="px-3 md:px-5 py-3">
                           <Skeleton className="h-4 w-full" />
                         </td>
                       </tr>
@@ -282,7 +300,7 @@ function DashboardContent() {
                           key={h.symbol}
                           className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
                         >
-                          <td className="py-3 px-5">
+                          <td className="py-3 px-3 md:px-5">
                             <div className="flex items-center gap-2">
                               <div>
                                 <p className="font-semibold">{h.symbol}</p>
@@ -302,21 +320,21 @@ function DashboardContent() {
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-5 text-right tabular-nums text-muted-foreground">
+                          <td className="py-3 px-3 md:px-5 text-right tabular-nums text-muted-foreground">
                             {(h.sharesOwned ?? 0).toFixed(2)}
                           </td>
-                          <td className="py-3 px-5 text-right tabular-nums text-muted-foreground">
+                          <td className="py-3 px-3 md:px-5 text-right tabular-nums text-muted-foreground">
                             {h.avgCostBasis ? usd2(h.avgCostBasis) : '—'}
                           </td>
-                          <td className="py-3 px-5 text-right tabular-nums font-medium">
+                          <td className="py-3 px-3 md:px-5 text-right tabular-nums font-medium">
                             {h.currentPrice ? usd2(h.currentPrice) : '—'}
                           </td>
-                          <td className="py-3 px-5 text-right tabular-nums font-semibold">
+                          <td className="py-3 px-3 md:px-5 text-right tabular-nums font-semibold">
                             {h.currentValue ? usd(h.currentValue) : '—'}
                           </td>
                           <td
                             className={cn(
-                              'py-3 px-5 text-right tabular-nums font-semibold',
+                              'py-3 px-3 md:px-5 text-right tabular-nums font-semibold',
                               pnlPos ? 'text-emerald-600' : 'text-red-600'
                             )}
                           >
@@ -326,7 +344,7 @@ function DashboardContent() {
                           </td>
                           <td
                             className={cn(
-                              'py-3 px-5 text-right tabular-nums text-sm',
+                              'py-3 px-3 md:px-5 text-right tabular-nums text-sm',
                               Math.abs(drift) > 5
                                 ? drift > 0
                                   ? 'text-emerald-600'

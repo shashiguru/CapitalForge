@@ -7,10 +7,11 @@ import { BottomTabBar } from './bottom-tab-bar';
 import { useAuth } from '@/contexts/auth-context';
 import { usePortfolio } from '@/contexts/portfolio-context';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AppLoadingScreen } from './app-loading-screen';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { fetchPortfolios } = usePortfolio();
+  const { fetchPortfolios, isLoading: portfolioLoading, hasFetched } = usePortfolio();
   const router = useRouter();
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
 
@@ -45,12 +46,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  const portfolioPending = portfolioLoading || !hasFetched;
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopNav />
-      {/* pb-20 on mobile leaves space for the bottom tab bar */}
-      <main className="flex-1 w-full px-4 md:px-8 py-6 pb-24 md:pb-8">
-        {children}
+      <main className="flex-1 w-full px-4 md:px-8 py-3 md:py-6 pb-24 md:pb-8">
+        {portfolioPending ? <AppLoadingScreen withNav /> : children}
       </main>
       <BottomTabBar />
     </div>

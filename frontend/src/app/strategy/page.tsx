@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { usePortfolio } from '@/contexts/portfolio-context';
 import { strategyApi, portfolioApi, marketDataApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
+import { PageHeader } from '@/components/layout/page-header';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import {
@@ -130,29 +131,28 @@ export default function StrategyPage() {
 
   return (
     <AppShell>
-      {/* ─── Header ─── */}
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-serif font-normal">Weekly Strategy</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Buy amounts derived from weeklyDCA × multiplier. Multipliers stored, never raw USD.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleSync}
-          disabled={isSyncing || isLoading}
-          className="mt-1"
-        >
-          {isSyncing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5 mr-2" />
-          )}
-          Sync Yahoo Finance
-        </Button>
-      </div>
+      <PageHeader
+        title="Weekly Strategy"
+        subtitle="Buy amounts derived from weeklyDCA × multiplier. Multipliers stored, never raw USD."
+        actions={
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={handleSync}
+            disabled={isSyncing || isLoading}
+            aria-label="Sync Yahoo Finance"
+            title="Sync Yahoo Finance"
+            className="md:size-auto md:h-8 md:px-3"
+          >
+            {isSyncing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden md:inline">Sync Yahoo Finance</span>
+          </Button>
+        }
+      />
 
       {/* ─── Strategy Table ─── */}
       <div className="bg-card border border-border rounded-sm overflow-hidden mb-6">

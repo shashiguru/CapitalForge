@@ -81,6 +81,17 @@ export interface BudgetPreset {
   createdAt: Date;
 }
 
+export interface BudgetPresetStock {
+  id: string;
+  budgetPresetId: string;
+  symbol: string;
+  companyName: string | null;
+  targetPercentage: number;
+  isAggressive: boolean;
+  fiftyTwoWeekHigh: number | null;
+  sortOrder: number;
+}
+
 // Allocation Types
 export interface Allocation {
   id: string;

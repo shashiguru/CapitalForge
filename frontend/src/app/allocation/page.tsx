@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { usePortfolio } from '@/contexts/portfolio-context';
-import { analyticsApi } from '@/lib/api';
+import { analyticsApi, portfolioApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
+import { PageHeader } from '@/components/layout/page-header';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { AllocationRebalance, AllocationRebalanceRow } from '@/lib/types';
+import type { AllocationRebalance, AllocationRebalanceRow, BudgetPreset } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 type View = 'year' | 'alltime';
@@ -52,18 +53,33 @@ function ActionBadge({ action }: { action: AllocationRebalanceRow['action'] }) {
   );
 }
 
+function getAllTimeAction(
+  delta: number,
+  targetUSD: number,
+): AllocationRebalanceRow['action'] {
+  if (delta > targetUSD * 0.05) return 'BUY';
+  if (delta < -targetUSD * 0.05) return 'OVERWEIGHT';
+  return 'ON_TRACK';
+}
+
 export default function AllocationPage() {
   const { selectedPortfolio } = usePortfolio();
   const [data, setData] = useState<AllocationRebalance | null>(null);
+  const [budgetPresets, setBudgetPresets] = useState<BudgetPreset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<View>('year');
 
   useEffect(() => {
     if (!selectedPortfolio) return;
     setIsLoading(true);
-    analyticsApi
-      .getAllocationRebalance(selectedPortfolio.id)
-      .then((d) => setData(d))
+    Promise.all([
+      analyticsApi.getAllocationRebalance(selectedPortfolio.id),
+      portfolioApi.getBudgetPresets(selectedPortfolio.id).catch(() => []),
+    ])
+      .then(([rebalance, presets]) => {
+        setData(rebalance);
+        setBudgetPresets(presets);
+      })
       .catch(() => {})
       .finally(() => setIsLoading(false));
   }, [selectedPortfolio]);
@@ -79,35 +95,86 @@ export default function AllocationPage() {
   }
 
   const rows = data?.rows ?? [];
-  const totalTarget = data?.totalTargetUSD ?? 0;
+  const yearTargetUSD = data?.totalTargetUSD ?? selectedPortfolio.totalCapital ?? 0;
+  const sortedBudgetPresets = [...budgetPresets].sort((a, b) =>
+    (a.budgetYearStart ?? a.name).localeCompare(b.budgetYearStart ?? b.name),
+  );
+  const lifetimeBudgetTotal =
+    sortedBudgetPresets.length > 0
+      ? sortedBudgetPresets.reduce((s, p) => s + p.totalCapital, 0)
+      : yearTargetUSD;
+  const totalTarget = view === 'alltime' ? lifetimeBudgetTotal : yearTargetUSD;
   const totalInvested = data?.totalInvested ?? 0;
   const totalYtd = data?.totalYtdInvested ?? 0;
   const totalCurrentValue = data?.totalCurrentValue ?? 0;
-  const overallProgress = totalTarget > 0 ? (totalInvested / totalTarget) * 100 : 0;
-  const ytdProgress = totalTarget > 0 ? (totalYtd / totalTarget) * 100 : 0;
-  const buyRows = rows.filter((r) => r.action === 'BUY');
-  const totalBuyNeeded = buyRows.reduce((s, r) => s + r.rebalanceDelta, 0);
+  const overallProgress =
+    lifetimeBudgetTotal > 0 ? (totalInvested / lifetimeBudgetTotal) * 100 : 0;
+  const ytdProgress = yearTargetUSD > 0 ? (totalYtd / yearTargetUSD) * 100 : 0;
+
+  const lifetimeTargetUSD = (row: AllocationRebalanceRow) =>
+    (row.targetPercent / 100) * lifetimeBudgetTotal;
+  const allTimeProgress = (row: AllocationRebalanceRow) => {
+    const target = lifetimeTargetUSD(row);
+    return target > 0 ? (row.totalInvested / target) * 100 : 0;
+  };
+  const allTimeDelta = (row: AllocationRebalanceRow) =>
+    lifetimeTargetUSD(row) - row.totalInvested;
+
+  const buyRows = rows.filter((row) => {
+    if (view === 'year') return row.action === 'BUY';
+    return getAllTimeAction(allTimeDelta(row), lifetimeTargetUSD(row)) === 'BUY';
+  });
+  const totalBuyNeeded = buyRows.reduce((s, row) => {
+    const delta = view === 'year' ? row.rebalanceDelta : allTimeDelta(row);
+    return s + Math.max(delta, 0);
+  }, 0);
   const yearLabel = data ? `${new Date(data.yearStart).getFullYear()} Fiscal Year` : 'Current Year';
 
   return (
     <AppShell>
-      {/* Header */}
-      <div className="mb-8">
-        <p className="label-caps mb-1">Allocation · Rebalancing</p>
-        <h1 className="text-5xl font-serif font-normal text-foreground leading-tight">
-          Allocation Tracker
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {selectedPortfolio.name} · Track progress toward targets &amp; identify rebalancing needs
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Allocation · Rebalancing"
+        title="Allocation Tracker"
+        titleSize="large"
+        subtitle={`${selectedPortfolio.name} · Track progress toward targets & identify rebalancing needs`}
+        actions={
+          sortedBudgetPresets.length > 0 ? (
+            <div className="hidden md:flex items-center gap-6 pt-2">
+              {sortedBudgetPresets.map((preset) => (
+                <div key={preset.id} className="text-right">
+                  <p className="label-caps">{preset.name}</p>
+                  <p className="text-lg font-semibold tabular-nums">{usd(preset.totalCapital)}</p>
+                </div>
+              ))}
+            </div>
+          ) : undefined
+        }
+      />
+
+      {sortedBudgetPresets.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 mb-4 md:hidden">
+          {sortedBudgetPresets.map((preset) => (
+            <div key={preset.id} className="bg-card border border-border rounded-sm p-3">
+              <p className="label-caps mb-1 text-[10px]">{preset.name}</p>
+              <p className="text-xl font-serif tabular-nums">{usd(preset.totalCapital)}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-card border border-border rounded-sm p-4">
-          <p className="label-caps mb-2">Total Target</p>
+          <p className="label-caps mb-2">{view === 'alltime' ? 'Total Budget' : 'Year Target'}</p>
           {isLoading ? <Skeleton className="h-8 w-24" /> : (
-            <p className="text-2xl font-serif tabular-nums">{usd(totalTarget)}</p>
+            <>
+              <p className="text-2xl font-serif tabular-nums">{usd(totalTarget)}</p>
+              {view === 'alltime' && sortedBudgetPresets.length > 1 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {sortedBudgetPresets.map((p) => usd(p.totalCapital)).join(' + ')}
+                </p>
+              )}
+            </>
           )}
         </div>
         <div className="bg-card border border-border rounded-sm p-4">
@@ -118,7 +185,9 @@ export default function AllocationPage() {
               <div className="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
                 <div className="h-full bg-foreground rounded-full" style={{ width: `${Math.min(overallProgress, 100)}%` }} />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">{overallProgress.toFixed(1)}% of target</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {overallProgress.toFixed(1)}% of total budget ({usd(lifetimeBudgetTotal)})
+              </p>
             </>
           )}
         </div>
@@ -130,7 +199,9 @@ export default function AllocationPage() {
               <div className="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
                 <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(ytdProgress, 100)}%` }} />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">{ytdProgress.toFixed(1)}% of target</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {ytdProgress.toFixed(1)}% of {yearLabel.toLowerCase()} ({usd(yearTargetUSD)})
+              </p>
             </>
           )}
         </div>
@@ -208,9 +279,16 @@ export default function AllocationPage() {
                     </tr>
                   )
                 : rows.map((row) => {
+                    const rowTargetUSD =
+                      view === 'year' ? row.targetAllocationUSD : lifetimeTargetUSD(row);
                     const invested = view === 'year' ? row.ytdInvested : row.totalInvested;
-                    const progress = view === 'year' ? row.ytdProgress : row.allocationProgress;
-                    const delta = view === 'year' ? row.ytdRebalanceDelta : row.rebalanceDelta;
+                    const progress =
+                      view === 'year' ? row.ytdProgress : allTimeProgress(row);
+                    const delta = view === 'year' ? row.ytdRebalanceDelta : allTimeDelta(row);
+                    const action =
+                      view === 'year'
+                        ? row.action
+                        : getAllTimeAction(delta, rowTargetUSD);
                     const drift = row.driftPercent;
                     return (
                       <tr key={row.symbol} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
@@ -221,7 +299,7 @@ export default function AllocationPage() {
                           </div>
                         </td>
                         <td className="py-3.5 px-5 text-right tabular-nums font-medium">{row.targetPercent.toFixed(0)}%</td>
-                        <td className="py-3.5 px-5 text-right tabular-nums text-muted-foreground">{usd(row.targetAllocationUSD)}</td>
+                        <td className="py-3.5 px-5 text-right tabular-nums text-muted-foreground">{usd(rowTargetUSD)}</td>
                         <td className="py-3.5 px-5 text-right tabular-nums font-semibold">
                           {usd(invested)}
                           {view === 'year' && row.ytdTransactionCount > 0 && (
@@ -247,7 +325,7 @@ export default function AllocationPage() {
                             </p>
                           )}
                         </td>
-                        <td className="py-3.5 px-5 text-right"><ActionBadge action={row.action} /></td>
+                        <td className="py-3.5 px-5 text-right"><ActionBadge action={action} /></td>
                       </tr>
                     );
                   })}
@@ -259,10 +337,10 @@ export default function AllocationPage() {
                   : rows.reduce((s, r) => s + r.totalInvested, 0);
                 const avgProg = view === 'year'
                   ? rows.reduce((s, r) => s + r.ytdProgress, 0) / rows.length
-                  : rows.reduce((s, r) => s + r.allocationProgress, 0) / rows.length;
+                  : rows.reduce((s, r) => s + allTimeProgress(r), 0) / rows.length;
                 const totalDelta = view === 'year'
                   ? rows.reduce((s, r) => s + r.ytdRebalanceDelta, 0)
-                  : rows.reduce((s, r) => s + r.rebalanceDelta, 0);
+                  : rows.reduce((s, r) => s + allTimeDelta(r), 0);
                 return (
                   <tr className="bg-muted/30 border-t-2 border-border font-semibold">
                     <td className="py-3 px-5 text-xs uppercase tracking-wider text-muted-foreground">Total</td>
@@ -290,21 +368,24 @@ export default function AllocationPage() {
         <div className="border border-blue-200 bg-blue-50 rounded-sm p-5">
           <p className="label-caps text-blue-600 mb-3">Rebalancing Suggestions</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {buyRows.map((row) => (
+            {buyRows.map((row) => {
+              const delta = view === 'alltime' ? allTimeDelta(row) : row.rebalanceDelta;
+              const progress = view === 'alltime' ? allTimeProgress(row) : row.allocationProgress;
+              return (
               <div key={row.symbol} className="bg-white border border-blue-100 rounded-sm p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-semibold text-sm">{row.symbol}</span>
-                  <span className="text-xs text-blue-600 font-bold">{usd(row.rebalanceDelta)}</span>
+                  <span className="text-xs text-blue-600 font-bold">{usd(Math.max(delta, 0))}</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  {row.allocationProgress.toFixed(0)}% of target filled ·{' '}
+                  {progress.toFixed(0)}% of target filled ·{' '}
                   {row.sharesToBuy > 0 ? `~${row.sharesToBuy} sh to buy` : 'top up needed'}
                 </p>
                 <div className="mt-1.5 h-1 bg-blue-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.min(row.allocationProgress, 100)}%` }} />
+                  <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.min(progress, 100)}%` }} />
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         </div>
       )}

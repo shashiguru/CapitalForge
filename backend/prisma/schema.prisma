@@ -61,9 +61,28 @@ model BudgetPreset {
   budgetYearEnd   DateTime? @db.Date
   createdAt       DateTime  @default(now())
   portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  stocks          BudgetPresetStock[]
 
   @@index([portfolioId])
   @@map("budget_presets")
+}
+
+model BudgetPresetStock {
+  id               String       @id @default(uuid())
+  budgetPresetId   String
+  symbol           String
+  companyName      String?
+  targetPercentage Decimal      @db.Decimal(5, 2)
+  isAggressive     Boolean      @default(false)
+  fiftyTwoWeekHigh Decimal?     @db.Decimal(18, 4)
+  sortOrder        Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  budgetPreset     BudgetPreset @relation(fields: [budgetPresetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetPresetId, symbol])
+  @@index([budgetPresetId])
+  @@map("budget_preset_stocks")
 }
 
 model CoreStock {

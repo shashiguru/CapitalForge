@@ -7,6 +7,7 @@ import type {
   PortfolioSummary,
   CreatePortfolioDto,
   BudgetPreset,
+  BudgetPresetStock,
   Allocation,
   AllocationSummary,
   CreateAllocationDto,
@@ -142,6 +143,63 @@ export const portfolioApi = {
 
   deleteBudgetPreset: async (portfolioId: string, presetId: string): Promise<void> => {
     await api.delete(`/portfolios/${portfolioId}/budget-presets/${presetId}`);
+  },
+
+  getBudgetPresetComposition: async (
+    portfolioId: string,
+    presetId: string,
+  ): Promise<BudgetPresetStock[]> => {
+    const { data } = await api.get<BudgetPresetStock[]>(
+      `/portfolios/${portfolioId}/budget-presets/${presetId}/composition`,
+    );
+    return data;
+  },
+
+  getBudgetPresetCompositionWithFallback: async (
+    portfolioId: string,
+    presetId: string,
+    fallbackAllocations: Allocation[],
+  ): Promise<BudgetPresetStock[]> => {
+    try {
+      const { data } = await api.get<BudgetPresetStock[]>(
+        `/portfolios/${portfolioId}/budget-presets/${presetId}/composition`,
+      );
+      return data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return fallbackAllocations
+          .filter((allocation) => allocation.isActive)
+          .map((allocation, index) => ({
+            id: allocation.id,
+            budgetPresetId: presetId,
+            symbol: allocation.symbol,
+            companyName: allocation.companyName,
+            targetPercentage: allocation.targetPercentage,
+            isAggressive: allocation.isAggressive ?? false,
+            fiftyTwoWeekHigh: allocation.fiftyTwoWeekHigh,
+            sortOrder: index,
+          }));
+      }
+      throw error;
+    }
+  },
+
+  saveBudgetPresetComposition: async (
+    portfolioId: string,
+    presetId: string,
+    stocks: {
+      symbol: string;
+      targetPercentage: number;
+      isAggressive?: boolean;
+      fiftyTwoWeekHigh?: number;
+      companyName?: string;
+    }[],
+  ): Promise<BudgetPresetStock[]> => {
+    const { data } = await api.put<BudgetPresetStock[]>(
+      `/portfolios/${portfolioId}/budget-presets/${presetId}/composition`,
+      { stocks },
+    );
+    return data;
   },
 };
 

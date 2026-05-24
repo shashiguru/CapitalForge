@@ -16,6 +16,10 @@ import {
   UpdateBudgetPresetDto,
   BudgetPresetResponseDto,
 } from './dto/budget-preset.dto';
+import {
+  SaveBudgetPresetCompositionDto,
+  BudgetPresetStockResponseDto,
+} from './dto/budget-preset-composition.dto';
 
 @Injectable()
 export class PortfolioService {
@@ -160,6 +164,9 @@ export class PortfolioService {
         budgetYearEnd: dto.budgetYearEnd ? new Date(dto.budgetYearEnd) : undefined,
       },
     });
+
+    await this.copyActiveAllocationsToPreset(portfolioId, preset.id);
+
     return this.mapPresetToResponse(preset);
   }
 
@@ -216,10 +223,67 @@ export class PortfolioService {
       },
     });
 
-    // Recalculate all allocation buckets with the new budget
+    await this.syncAllocationsFromPreset(portfolioId, presetId);
     await this.recalculateBuckets(portfolioId);
 
     return this.mapToResponse(portfolio);
+  }
+
+  async getBudgetPresetComposition(
+    portfolioId: string,
+    presetId: string,
+    userId: string,
+  ): Promise<BudgetPresetStockResponseDto[]> {
+    await this.validateOwnership(portfolioId, userId);
+    await this.ensurePresetExists(portfolioId, presetId);
+
+    const stocks = await this.prisma.budgetPresetStock.findMany({
+      where: { budgetPresetId: presetId },
+      orderBy: [{ sortOrder: 'asc' }, { symbol: 'asc' }],
+    });
+
+    return stocks.map((s) => this.mapPresetStockToResponse(s));
+  }
+
+  async saveBudgetPresetComposition(
+    portfolioId: string,
+    presetId: string,
+    userId: string,
+    dto: SaveBudgetPresetCompositionDto,
+  ): Promise<BudgetPresetStockResponseDto[]> {
+    await this.validateOwnership(portfolioId, userId);
+    await this.ensurePresetExists(portfolioId, presetId);
+
+    const symbols = dto.stocks.map((s) => s.symbol.toUpperCase());
+    if (new Set(symbols).size !== symbols.length) {
+      throw new BadRequestException('Duplicate symbols are not allowed');
+    }
+
+    const totalPct = dto.stocks.reduce((sum, s) => sum + s.targetPercentage, 0);
+    if (totalPct > 100.05) {
+      throw new BadRequestException(
+        `Total target percentage is ${totalPct.toFixed(1)}% — must be ≤ 100%`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.budgetPresetStock.deleteMany({ where: { budgetPresetId: presetId } });
+      if (dto.stocks.length > 0) {
+        await tx.budgetPresetStock.createMany({
+          data: dto.stocks.map((stock, index) => ({
+            budgetPresetId: presetId,
+            symbol: stock.symbol.toUpperCase(),
+            companyName: stock.companyName ?? null,
+            targetPercentage: stock.targetPercentage,
+            isAggressive: stock.isAggressive ?? false,
+            fiftyTwoWeekHigh: stock.fiftyTwoWeekHigh ?? null,
+            sortOrder: index,
+          })),
+        });
+      }
+    });
+
+    return this.getBudgetPresetComposition(portfolioId, presetId, userId);
   }
 
   async deleteBudgetPreset(
@@ -352,6 +416,174 @@ export class PortfolioService {
 
     prices.forEach((p) => priceMap.set(p.symbol, Number(p.close)));
     return priceMap;
+  }
+
+  private async ensurePresetExists(portfolioId: string, presetId: string) {
+    const preset = await this.prisma.budgetPreset.findFirst({
+      where: { id: presetId, portfolioId },
+    });
+    if (!preset) throw new NotFoundException('Budget preset not found');
+    return preset;
+  }
+
+  private async copyActiveAllocationsToPreset(
+    portfolioId: string,
+    presetId: string,
+  ): Promise<void> {
+    const allocations = await this.prisma.allocation.findMany({
+      where: { portfolioId, isActive: true },
+      orderBy: { symbol: 'asc' },
+    });
+
+    if (allocations.length === 0) return;
+
+    await this.prisma.budgetPresetStock.createMany({
+      data: allocations.map((a, index) => ({
+        budgetPresetId: presetId,
+        symbol: a.symbol,
+        companyName: a.companyName,
+        targetPercentage: a.targetPercentage,
+        isAggressive: a.isAggressive,
+        fiftyTwoWeekHigh: a.fiftyTwoWeekHigh,
+        sortOrder: index,
+      })),
+    });
+  }
+
+  /** Apply a preset's stock list to live portfolio allocations (strategy targets). */
+  private async syncAllocationsFromPreset(
+    portfolioId: string,
+    presetId: string,
+  ): Promise<void> {
+    const presetStocks = await this.prisma.budgetPresetStock.findMany({
+      where: { budgetPresetId: presetId },
+      orderBy: [{ sortOrder: 'asc' }, { symbol: 'asc' }],
+    });
+
+    const presetSymbols = new Set(presetStocks.map((s) => s.symbol));
+    const portfolio = await this.prisma.portfolio.findUnique({
+      where: { id: portfolioId },
+    });
+    if (!portfolio) return;
+
+    const totalCapital = Number(portfolio.totalCapital);
+    const coreRatio = Number(portfolio.coreRatio);
+    const dipRatio = Number(portfolio.dipRatio);
+    const crashRatio = Number(portfolio.crashRatio);
+    const dcaWeeksPerYear = portfolio.dcaWeeksPerYear;
+
+    const existing = await this.prisma.allocation.findMany({
+      where: { portfolioId },
+    });
+
+    for (const stock of presetStocks) {
+      const targetPercentage = Number(stock.targetPercentage);
+      const { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA } =
+        this.computeAllocationFields(
+          totalCapital,
+          targetPercentage,
+          coreRatio,
+          dipRatio,
+          crashRatio,
+          dcaWeeksPerYear,
+        );
+
+      const current = existing.find((a) => a.symbol === stock.symbol);
+      if (current) {
+        const coreUsed = Number(current.coreUsedUSD);
+        const dipUsed = Number(current.dipUsedUSD);
+        const crashUsed = Number(current.crashUsedUSD);
+
+        await this.prisma.allocation.update({
+          where: { id: current.id },
+          data: {
+            isActive: true,
+            companyName: stock.companyName ?? current.companyName,
+            targetPercentage: stock.targetPercentage,
+            isAggressive: stock.isAggressive,
+            fiftyTwoWeekHigh: stock.fiftyTwoWeekHigh ?? current.fiftyTwoWeekHigh,
+            allocationUSD,
+            coreBucketUSD,
+            dipBucketUSD,
+            crashBucketUSD,
+            monthlyDCA,
+            weeklyDCA,
+            coreRemainingUSD: Math.max(0, coreBucketUSD - coreUsed),
+            dipRemainingUSD: Math.max(0, dipBucketUSD - dipUsed),
+            crashRemainingUSD: Math.max(0, crashBucketUSD - crashUsed),
+          },
+        });
+      } else {
+        await this.prisma.allocation.create({
+          data: {
+            portfolioId,
+            symbol: stock.symbol,
+            companyName: stock.companyName,
+            targetPercentage: stock.targetPercentage,
+            isAggressive: stock.isAggressive,
+            fiftyTwoWeekHigh: stock.fiftyTwoWeekHigh,
+            allocationUSD,
+            coreBucketUSD,
+            dipBucketUSD,
+            crashBucketUSD,
+            monthlyDCA,
+            weeklyDCA,
+            coreRemainingUSD: coreBucketUSD,
+            dipRemainingUSD: dipBucketUSD,
+            crashRemainingUSD: crashBucketUSD,
+            isActive: true,
+          },
+        });
+      }
+    }
+
+    for (const allocation of existing) {
+      if (!presetSymbols.has(allocation.symbol)) {
+        await this.prisma.allocation.update({
+          where: { id: allocation.id },
+          data: { isActive: false },
+        });
+      }
+    }
+  }
+
+  private computeAllocationFields(
+    totalCapital: number,
+    targetPercentage: number,
+    coreRatio: number,
+    dipRatio: number,
+    crashRatio: number,
+    dcaWeeksPerYear: number,
+  ) {
+    const allocationUSD = (totalCapital * targetPercentage) / 100;
+    const coreBucketUSD = allocationUSD * coreRatio;
+    const dipBucketUSD = allocationUSD * dipRatio;
+    const crashBucketUSD = allocationUSD * crashRatio;
+    const monthlyDCA = coreBucketUSD / 12;
+    const weeklyDCA = coreBucketUSD / dcaWeeksPerYear;
+    return { allocationUSD, coreBucketUSD, dipBucketUSD, crashBucketUSD, monthlyDCA, weeklyDCA };
+  }
+
+  private mapPresetStockToResponse(stock: {
+    id: string;
+    budgetPresetId: string;
+    symbol: string;
+    companyName: string | null;
+    targetPercentage: unknown;
+    isAggressive: boolean;
+    fiftyTwoWeekHigh: unknown;
+    sortOrder: number;
+  }): BudgetPresetStockResponseDto {
+    return {
+      id: stock.id,
+      budgetPresetId: stock.budgetPresetId,
+      symbol: stock.symbol,
+      companyName: stock.companyName,
+      targetPercentage: Number(stock.targetPercentage),
+      isAggressive: stock.isAggressive,
+      fiftyTwoWeekHigh: stock.fiftyTwoWeekHigh != null ? Number(stock.fiftyTwoWeekHigh) : null,
+      sortOrder: stock.sortOrder,
+    };
   }
 
   private mapPresetToResponse(preset: any): BudgetPresetResponseDto {

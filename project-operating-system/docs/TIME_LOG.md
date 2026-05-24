@@ -66,6 +66,29 @@ Copy at end of each week:
 
 ## Log Entries
 
+### 2026-05-24 — Agent — [FIX] Service worker + budget composition fallback
+
+| Field | Value |
+|-------|-------|
+| **Feature(s)** | Budget presets, PWA |
+| **Estimated** | 1h |
+| **Actual** | 0.5h |
+| **Outcome** | Completed |
+
+**Work performed:**
+- Fixed `sw.js` Response clone loop (152 console errors) by bypassing navigations, `_next`, and cross-origin requests
+- Disabled service worker registration in dev; bumped cache to `capitalforge-v2`
+- Added `getBudgetPresetCompositionWithFallback` for 404 when production backend lacks composition route
+
+**Blockers:**
+- Production Render backend still needs redeploy + `BudgetPresetStock` migration for full per-year composition API
+
+**Next actions:**
+- [ ] Deploy backend with composition endpoints to Render
+- [ ] Hard refresh or clear site data once to drop old service worker in browser
+
+---
+
 ### 2026-05-24 — Agent — Project Operating System Setup
 
 | Field | Value |

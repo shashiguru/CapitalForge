@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePortfolio } from '@/contexts/portfolio-context';
 import { transactionApi, coreStockApi } from '@/lib/api';
 import { AppShell } from '@/components/layout/app-shell';
+import { PageHeader } from '@/components/layout/page-header';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,6 +49,131 @@ function Badge({ label, styleClass }: { label: string; styleClass: string }) {
     <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded border', styleClass)}>
       {label}
     </span>
+  );
+}
+
+interface TransactionFormProps {
+  isEdit: boolean;
+  symbol: string;
+  setSymbol: (v: string) => void;
+  type: TransactionType;
+  setType: (v: TransactionType) => void;
+  price: string;
+  setPrice: (v: string) => void;
+  amountBought: string;
+  setAmountBought: (v: string) => void;
+  quantity: string;
+  setQuantity: (v: string) => void;
+  fees: string;
+  setFees: (v: string) => void;
+  notes: string;
+  setNotes: (v: string) => void;
+  date: string;
+  setDate: (v: string) => void;
+  calcQty: string;
+  coreStocks: { symbol: string; displayName: string | null }[];
+  editingTransaction?: Transaction | null;
+}
+
+function TransactionForm({
+  isEdit,
+  symbol,
+  setSymbol,
+  type,
+  setType,
+  price,
+  setPrice,
+  amountBought,
+  setAmountBought,
+  quantity,
+  setQuantity,
+  fees,
+  setFees,
+  notes,
+  setNotes,
+  date,
+  setDate,
+  calcQty,
+  coreStocks,
+  editingTransaction,
+}: TransactionFormProps) {
+  return (
+    <div className="grid gap-4 py-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Symbol</Label>
+          <Select value={symbol} onValueChange={setSymbol}>
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select stock" />
+            </SelectTrigger>
+            <SelectContent>
+              {coreStocks.map((s) => (
+                <SelectItem key={s.symbol} value={s.symbol} className="text-sm">
+                  {s.symbol}{s.displayName ? ` (${s.displayName})` : ''}
+                </SelectItem>
+              ))}
+              {isEdit && editingTransaction && !coreStocks.some((s) => s.symbol === editingTransaction.symbol) && (
+                <SelectItem value={editingTransaction.symbol} className="text-sm">{editingTransaction.symbol}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Type</Label>
+          <Select value={type} onValueChange={(v) => setType(v as TransactionType)}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {['BUY', 'SELL', 'DIVIDEND', 'FEE'].map((t) => (
+                <SelectItem key={t} value={t} className="text-sm">{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Price ($)</Label>
+          <Input className="h-9 text-sm" type="number" step="any" min="0.0001" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="150.00" required />
+        </div>
+        {isEdit ? (
+          <div className="space-y-1.5">
+            <Label className="text-xs">Quantity</Label>
+            <Input className="h-9 text-sm" type="number" step="any" min="0.000001" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10.5" required />
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label className="text-xs">Amount ($)</Label>
+            <Input className="h-9 text-sm" type="number" step="any" min="0" value={amountBought} onChange={(e) => setAmountBought(e.target.value)} placeholder="1500.00" required />
+          </div>
+        )}
+      </div>
+
+      {!isEdit && (
+        <div className="space-y-1.5">
+          <Label className="text-xs">Quantity (auto)</Label>
+          <div className="h-9 flex items-center px-3 rounded-sm border bg-muted/40 text-sm tabular-nums text-muted-foreground">
+            {calcQty ? `${calcQty} shares` : 'Enter price and amount'}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Fees (optional)</Label>
+          <Input className="h-9 text-sm" type="number" step="any" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Date</Label>
+          <Input className="h-9 text-sm" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Notes (optional)</Label>
+        <Input className="h-9 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
+      </div>
+    </div>
   );
 }
 
@@ -190,85 +316,6 @@ export default function TransactionsPage() {
     a.click();
   };
 
-  const TransactionForm = ({ isEdit }: { isEdit: boolean }) => (
-    <div className="grid gap-4 py-2">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Symbol</Label>
-          <Select value={symbol} onValueChange={setSymbol}>
-            <SelectTrigger className="h-9 text-sm">
-              <SelectValue placeholder="Select stock" />
-            </SelectTrigger>
-            <SelectContent>
-              {coreStocks.map((s) => (
-                <SelectItem key={s.symbol} value={s.symbol} className="text-sm">
-                  {s.symbol}{s.displayName ? ` (${s.displayName})` : ''}
-                </SelectItem>
-              ))}
-              {isEdit && editingTransaction && !coreStocks.some((s) => s.symbol === editingTransaction.symbol) && (
-                <SelectItem value={editingTransaction.symbol} className="text-sm">{editingTransaction.symbol}</SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Type</Label>
-          <Select value={type} onValueChange={(v) => setType(v as TransactionType)}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {['BUY', 'SELL', 'DIVIDEND', 'FEE'].map((t) => (
-                <SelectItem key={t} value={t} className="text-sm">{t}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Price ($)</Label>
-          <Input className="h-9 text-sm" type="number" step="any" min="0.0001" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="150.00" required />
-        </div>
-        {isEdit ? (
-          <div className="space-y-1.5">
-            <Label className="text-xs">Quantity</Label>
-            <Input className="h-9 text-sm" type="number" step="any" min="0.000001" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10.5" required />
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            <Label className="text-xs">Amount ($)</Label>
-            <Input className="h-9 text-sm" type="number" step="any" min="0" value={amountBought} onChange={(e) => setAmountBought(e.target.value)} placeholder="1500.00" required />
-          </div>
-        )}
-      </div>
-
-      {!isEdit && (
-        <div className="space-y-1.5">
-          <Label className="text-xs">Quantity (auto)</Label>
-          <div className="h-9 flex items-center px-3 rounded-sm border bg-muted/40 text-sm tabular-nums text-muted-foreground">
-            {calcQty ? `${calcQty} shares` : 'Enter price and amount'}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Fees (optional)</Label>
-          <Input className="h-9 text-sm" type="number" step="any" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Date</Label>
-          <Input className="h-9 text-sm" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label className="text-xs">Notes (optional)</Label>
-        <Input className="h-9 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
-      </div>
-    </div>
-  );
-
   if (!selectedPortfolio) {
     return (
       <AppShell>
@@ -281,37 +328,70 @@ export default function TransactionsPage() {
 
   return (
     <AppShell>
-      {/* ─── Header ─── */}
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-serif font-normal">Transactions</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isLoading ? '…' : `${transactions.length} records · $${(summary?.totalBuys ?? 0).toLocaleString()} deployed`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 mt-1">
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 border border-border rounded-sm hover:bg-muted/40 transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" /> Export CSV
-          </button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <button
-                onClick={() => { resetForm(); setIsDialogOpen(true); }}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 bg-foreground text-background rounded-sm hover:bg-foreground/90 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add transaction
-              </button>
-            </DialogTrigger>
+      <PageHeader
+        title="Transactions"
+        showSubtitleOnMobile
+        subtitle={
+          isLoading
+            ? '…'
+            : `${transactions.length} records · $${(summary?.totalBuys ?? 0).toLocaleString()} deployed`
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={handleExport}
+              aria-label="Export CSV"
+              title="Export CSV"
+              className="md:size-auto md:h-8 md:px-3"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Export CSV</span>
+            </Button>
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  aria-label="Add transaction"
+                  title="Add transaction"
+                  className="md:size-auto md:h-8 md:px-3"
+                  onClick={() => {
+                    resetForm();
+                    setIsDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Add transaction</span>
+                </Button>
+              </DialogTrigger>
             <DialogContent>
               <form onSubmit={handleSubmit}>
                 <DialogHeader>
                   <DialogTitle>Add Transaction</DialogTitle>
                   <DialogDescription>Record a new transaction.</DialogDescription>
                 </DialogHeader>
-                <TransactionForm isEdit={false} />
+                <TransactionForm
+                  isEdit={false}
+                  symbol={symbol}
+                  setSymbol={setSymbol}
+                  type={type}
+                  setType={setType}
+                  price={price}
+                  setPrice={setPrice}
+                  amountBought={amountBought}
+                  setAmountBought={setAmountBought}
+                  quantity={quantity}
+                  setQuantity={setQuantity}
+                  fees={fees}
+                  setFees={setFees}
+                  notes={notes}
+                  setNotes={setNotes}
+                  date={date}
+                  setDate={setDate}
+                  calcQty={calcQty}
+                  coreStocks={coreStocks}
+                />
                 <DialogFooter className="mt-4">
                   <Button variant="outline" type="button" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                   <Button type="submit" disabled={isSubmitting}>
@@ -321,14 +401,15 @@ export default function TransactionsPage() {
               </form>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* ─── Filters + table ─── */}
       <div className="bg-card border border-border rounded-sm">
         {/* Filters */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
-          <div className="relative flex-1 max-w-xs">
+        <div className="flex flex-col gap-2 px-4 py-3 border-b border-border sm:flex-row sm:items-center sm:gap-3 md:px-5">
+          <div className="relative flex-1 sm:max-w-xs">
             <Input
               placeholder="Search symbol, date, notes…"
               value={filterSymbol}
@@ -336,8 +417,9 @@ export default function TransactionsPage() {
               className="h-8 text-sm pl-3 bg-transparent border-border"
             />
           </div>
+          <div className="flex gap-2">
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="h-8 w-32 text-xs bg-transparent">
+            <SelectTrigger className="h-8 flex-1 sm:w-32 text-xs bg-transparent">
               <SelectValue placeholder="All types" />
             </SelectTrigger>
             <SelectContent>
@@ -349,7 +431,7 @@ export default function TransactionsPage() {
             </SelectContent>
           </Select>
           <Select value="ALL" onValueChange={() => {}}>
-            <SelectTrigger className="h-8 w-36 text-xs bg-transparent">
+            <SelectTrigger className="h-8 flex-1 sm:w-36 text-xs bg-transparent">
               <SelectValue placeholder="All symbols" />
             </SelectTrigger>
             <SelectContent>
@@ -359,6 +441,7 @@ export default function TransactionsPage() {
               ))}
             </SelectContent>
           </Select>
+          </div>
         </div>
 
         {/* Table */}
@@ -466,7 +549,28 @@ export default function TransactionsPage() {
               <DialogTitle>Edit Transaction</DialogTitle>
               <DialogDescription>Update transaction details.</DialogDescription>
             </DialogHeader>
-            <TransactionForm isEdit />
+            <TransactionForm
+              isEdit
+              symbol={symbol}
+              setSymbol={setSymbol}
+              type={type}
+              setType={setType}
+              price={price}
+              setPrice={setPrice}
+              amountBought={amountBought}
+              setAmountBought={setAmountBought}
+              quantity={quantity}
+              setQuantity={setQuantity}
+              fees={fees}
+              setFees={setFees}
+              notes={notes}
+              setNotes={setNotes}
+              date={date}
+              setDate={setDate}
+              calcQty={calcQty}
+              coreStocks={coreStocks}
+              editingTransaction={editingTransaction}
+            />
             <DialogFooter className="mt-4">
               <Button variant="outline" type="button" onClick={() => { setIsEditDialogOpen(false); setEditingTransaction(null); resetForm(); }}>Cancel</Button>
               <Button type="submit" disabled={isSubmitting}>
