@@ -1,0 +1,116 @@
+---
+description: CapitalForge coding standards — naming, organization, error handling, logging
+globs: "**/*.{ts,tsx,js,jsx}"
+alwaysApply: false
+---
+
+# CapitalForge Coding Standards
+
+## Naming Conventions
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| Files (backend) | kebab-case | `strategy.service.ts` |
+| Files (frontend pages) | kebab-case dir | `app/strategy/page.tsx` |
+| Classes | PascalCase | `StrategyService` |
+| Interfaces/Types | PascalCase | `CreateAllocationDto` |
+| Functions/methods | camelCase | `recalculateBuckets()` |
+| Constants | UPPER_SNAKE_CASE | `DEFAULT_DCA_WEEKS` |
+| DB tables | snake_case | `strategy_rules` |
+| Enums | PascalCase values | `TransactionType.BUY` |
+| React components | PascalCase | `AppShell` |
+
+## File Organization
+
+### Backend module structure
+```
+domain/
+├── domain.module.ts
+├── domain.controller.ts
+├── domain.service.ts
+└── dto/
+    └── domain.dto.ts
+```
+
+### Frontend structure
+```
+app/<route>/page.tsx     # Page component
+components/ui/           # shadcn primitives only
+components/layout/       # Shell, nav
+lib/api.ts               # All HTTP
+lib/types.ts             # Shared types
+contexts/                # React contexts
+```
+
+## Clean Code Rules
+
+- **Thin controllers** — HTTP only, logic in services
+- **Single responsibility** — one reason to change per file
+- **No dead code** — remove unused imports, variables, functions
+- **No magic numbers** — use named constants (e.g., `DEFAULT_CORE_RATIO = 0.60`)
+- **Early returns** — guard clauses over deep nesting
+- **Max function length** — ~40 lines; extract if longer
+- **DRY within module** — don't duplicate across modules unless shared in `common/`
+
+## Documentation Requirements
+
+- **Self-documenting code** preferred over comments
+- Comment only: non-obvious business logic, Excel formula references, workarounds
+- JSDoc on public service methods that cross modules
+- Update `API_CONTRACTS.md` when adding/changing endpoints
+- No README changes unless explicitly requested
+
+## Error Handling Standards
+
+### Backend
+```typescript
+throw new NotFoundException(`Portfolio ${id} not found`);
+throw new BadRequestException('Bucket ratios must sum to 1.0');
+```
+- Use NestJS built-in exceptions
+- Global filter handles formatting
+- Never expose stack traces to client in production
+
+### Frontend
+```typescript
+try {
+  await strategyApi.generate(portfolioId);
+  toast.success('Strategy generated');
+} catch (error) {
+  toast.error('Failed to generate strategy');
+}
+```
+- User-friendly messages in UI
+- 401 handled by axios interceptor (redirect to login)
+
+## Logging Standards
+
+```typescript
+private readonly logger = new Logger(ClassName.name);
+this.logger.log('Operation started');
+this.logger.warn('Degraded: using cached prices');
+this.logger.error('Failed', error.stack);
+```
+
+**Never log:** passwords, JWT tokens, DATABASE_URL, user PII beyond userId
+
+## TypeScript Standards
+
+- Strict mode enabled
+- No `any` unless unavoidable — prefer `unknown` + type guard
+- DTOs with class-validator decorators on all inputs
+- Shared types in `frontend/src/lib/types.ts` matching backend DTOs
+
+## Money Handling
+
+```typescript
+import { Decimal } from '@prisma/client/runtime/library';
+// Always Decimal for money — never Number()
+```
+
+## Import Order
+
+1. External packages (`@nestjs/*`, `react`)
+2. Internal modules (`../allocation/`)
+3. Relative imports (`./dto/`)
+4. Types (`import type { ... }`)

@@ -1,0 +1,73 @@
+---
+description: CapitalForge project operating rules — read context first, stay in scope, update logs
+alwaysApply: true
+---
+
+# CapitalForge Project Rules
+
+## Startup Protocol (Every Chat)
+
+1. **Read first:** `project-operating-system/docs/PROJECT_CONTEXT.md`
+2. **Check task scope:** `project-operating-system/docs/FEATURE_BACKLOG.md`
+3. **Load domain skill:** `project-operating-system/skills/<domain>-skill.md`
+4. **Check known issues:** `project-operating-system/docs/KNOWN_ISSUES.md`
+
+## Scope Discipline
+
+- **Never refactor unrelated modules** — if the task is strategy, don't touch auth or analytics
+- **Keep features isolated** — one feature per PR, one module focus
+- **Prefer modular code** — extend existing NestJS modules, don't create parallel implementations
+- **Prefer reusable components** — use shadcn/ui, extend `lib/api.ts`, don't duplicate axios calls
+- **Minimize diff scope** — simplest correct fix wins over elegant rewrites
+
+## Documentation Updates (Required After Work)
+
+| Change Type | Update |
+|-------------|--------|
+| Any work session | `docs/TIME_LOG.md` — append daily entry |
+| Feature progress | `docs/FEATURE_BACKLOG.md` — status, progress % |
+| Architectural decision | `docs/DECISION_LOG.md` — new ADR |
+| New bug discovered | `docs/KNOWN_ISSUES.md` |
+| API endpoint added/changed | `docs/API_CONTRACTS.md` |
+| Production release | `docs/RELEASE_NOTES.md` |
+
+## Business Logic Authority
+
+- **PRD.md** is the source of truth for business rules
+- Budget derivation chain: `totalBudget → allocationUSD → buckets → weeklyDCA → buyUSD = weeklyDCA × multiplier`
+- Strategy rules store **multipliers** (1, 3, 5), never raw USD or share counts
+- Bucket ratios default: 0.60 / 0.30 / 0.10 (must sum to 1.0)
+- DCA weeks: 48 (not 52) unless portfolio setting changed
+
+## Module Boundaries
+
+| Module | Path | Touch When |
+|--------|------|------------|
+| Strategy | `backend/src/strategy/` | Buy signals, snapshots, rules |
+| Allocation | `backend/src/allocation/` | Buckets, positions, recalc |
+| Transaction | `backend/src/transaction/` | Ledger, import, side effects |
+| Frontend | `frontend/src/app/` | Pages, UI |
+| API Client | `frontend/src/lib/api.ts` | HTTP methods |
+
+## Anti-Patterns (Never Do)
+
+- Refactor code outside task scope
+- Use JS `number` for money (use Prisma Decimal)
+- Add axios calls outside `lib/api.ts`
+- Store raw buy amounts in StrategyRule
+- Skip updating backlog/time log after work
+- Add dependencies without DECISION_LOG entry
+- Enable or retain AuthBypassMiddleware in production
+
+## Skills Reference
+
+Load from `project-operating-system/skills/`:
+- `frontend-skill.md` — UI work
+- `backend-skill.md` — API work
+- `database-skill.md` — Schema/migrations
+- `testing-skill.md` — Tests
+- `debugging-skill.md` — Bug investigation
+- `code-review-skill.md` — PR review
+- `architecture-skill.md` — Design decisions
+- `prd-skill.md` — Requirements
+- `reporting-skill.md` — Management reports

@@ -1,0 +1,98 @@
+---
+description: CapitalForge architecture rules — module boundaries, API design, security, scalability
+globs: "backend/**/*,frontend/**/*"
+alwaysApply: false
+---
+
+# CapitalForge Architecture Rules
+
+## System Architecture
+
+- **Pattern:** Modular monolith (ADR-001)
+- **Backend:** NestJS domain modules sharing PostgreSQL via Prisma
+- **Frontend:** Next.js App Router SPA calling REST API
+- **No microservices, no message queue in V1** (ADR-010)
+
+## Microservice Boundaries (Module Boundaries)
+
+Each NestJS module is a bounded context. Do not merge or split without ADR.
+
+| Module | Owns | Must NOT Do |
+|--------|------|-------------|
+| `auth/` | Registration, login, JWT, profile | Portfolio logic |
+| `portfolio/` | Portfolio CRUD, budget presets | Strategy computation |
+| `allocation/` | Stock allocations, bucket recalc, positions | Market data fetching |
+| `strategy/` | Buy plan generation, snapshots, rules | Direct DB writes to transactions |
+| `transaction/` | Ledger CRUD, import, side effects | Strategy logic |
+| `market-data/` | Yahoo sync, PriceDaily | Business rule computation |
+| `analytics/` | Read-only aggregations, charts | State mutations |
+| `budget/` | Weekly budget records | Allocation recalculation |
+| `core-stock/` | Core stock list | Strategy rules |
+
+**Cross-module communication:** Inject services via NestJS DI. Never import Prisma queries from another module's service file.
+
+## API Boundaries
+
+- All routes under `/api` prefix
+- Portfolio-scoped: `/api/portfolios/:portfolioId/<resource>`
+- Success: raw DTO (no wrapper)
+- Errors: `{ success: false, statusCode, message, errors, timestamp }`
+- New endpoints require: controller + service + DTO + `lib/api.ts` method + `API_CONTRACTS.md` entry
+- No versioning in V1 — use `/api/...` only
+
+## Event-Driven Rules
+
+**V1: No events.** All operations synchronous HTTP.
+
+Future events (V2+) require ADR before implementation:
+- Scheduled market sync
+- Email notifications
+- Audit log streaming
+
+## Scalability Rules
+
+- Backend services must be **stateless** (no in-memory caches)
+- Use Prisma `$transaction` for multi-table atomic updates
+- Query indexed columns (`portfolioId`, `symbol`, `date`)
+- Paginate lists > 50 items (target: F-012)
+- Batch external API calls (Yahoo Finance)
+- Connection pooling via Supabase pgbouncer
+
+## Security Rules
+
+- JWT auth on all routes except `@Public()` (register, login, health)
+- **Remove AuthBypassMiddleware** before production (BUG-001)
+- bcrypt password hashing
+- CORS restricted to known frontend origins
+- No secrets in code or git
+- Validate all inputs via class-validator DTOs
+- Future: enforce `portfolio.userId === req.user.id` on all portfolio routes
+
+## Data Architecture Rules
+
+- Money: Prisma `Decimal` — never JS float
+- Strategy rules: store multipliers, not amounts (ADR-002)
+- Bucket ratios: per-portfolio in DB, sum to 1.0 (ADR-003)
+- Computed fields (weeklyDCA): recalculate on budget/ratio change, don't stale
+- Migrations: forward-only via Prisma Migrate
+
+## Frontend Architecture Rules
+
+- All HTTP via `lib/api.ts` — no scattered axios
+- Auth token in localStorage, attached by interceptor
+- Business calculations: backend authoritative; client preview only for budget what-if
+- shadcn/ui for components — no new UI libraries without ADR
+
+## Deployment Architecture
+
+- Frontend: Vercel | Backend: Render | DB: Supabase
+- Health check: `GET /api/health`
+- Migrations: `prisma migrate deploy` on schema changes
+- See `DEPLOYMENT_GUIDE.md`
+
+## Decision Protocol
+
+Before architectural changes:
+1. Check `DECISION_LOG.md` for existing ADR
+2. If none, create ADR with context, alternatives, consequences
+3. Update `ARCHITECTURE.md` if boundaries or flows change

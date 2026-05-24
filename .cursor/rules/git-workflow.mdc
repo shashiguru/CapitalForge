@@ -1,0 +1,154 @@
+---
+description: CapitalForge git workflow — branches, commits, PRs, releases, merge strategy
+alwaysApply: true
+---
+
+# CapitalForge Git Workflow
+
+## Branch Naming
+
+```
+<type>/<feature-id>-<short-description>
+```
+
+| Type | Use | Example |
+|------|-----|---------|
+| `feature/` | New functionality | `feature/F-001-multiplier-strategy` |
+| `fix/` | Bug fixes | `fix/F-007-bucket-decrement` |
+| `docs/` | Documentation only | `docs/pos-operating-system` |
+| `refactor/` | No behavior change | `refactor/allocation-extract-recalc` |
+| `chore/` | Tooling, deps | `chore/upgrade-prisma` |
+| `test/` | Test additions | `test/strategy-excel-parity` |
+
+**Rules:**
+- Branch from latest `main`
+- One feature/fix per branch
+- Keep branches short-lived (< 1 week)
+
+## Commit Naming
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+```
+
+| Type | Use |
+|------|-----|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation |
+| `refactor` | Code restructure, no behavior change |
+| `test` | Tests |
+| `chore` | Tooling, deps |
+| `perf` | Performance improvement |
+
+**Examples:**
+```
+feat(strategy): use multiplier-based buy amounts
+fix(transaction): reverse bucket usage on delete
+docs(pos): add project operating system
+refactor(allocation): extract recalculateBuckets helper
+test(strategy): add Excel parity unit tests
+```
+
+**Rules:**
+- Imperative mood ("add" not "added")
+- Max 72 chars for subject line
+- Reference feature ID in body if applicable: `Closes F-001`
+
+## PR Naming
+
+```
+[F-0XX] Brief description of change
+```
+
+**Examples:**
+```
+[F-001] Multiplier-based strategy rules
+[F-003] Remove JWT auth bypass middleware
+[docs] Add project operating system
+```
+
+## PR Requirements
+
+Before opening PR:
+```
+□ Branch up to date with main
+□ Focused diff — one feature/fix
+□ FEATURE_BACKLOG.md updated
+□ TIME_LOG.md entry added
+□ DECISION_LOG.md updated (if architectural)
+□ Backend: lint + build + test pass
+□ Frontend: lint + build pass
+□ Manual test steps in PR description
+□ No secrets committed
+```
+
+## PR Description Template
+
+```markdown
+## Summary
+[1-2 sentences: what and why]
+
+## Feature
+F-0XX — [Feature name from backlog]
+
+## Test plan
+- [ ] [Specific step]
+- [ ] [Another step]
+
+## Screenshots
+[If UI change]
+```
+
+## Merge Strategy
+
+- **Default:** Squash merge to `main`
+- **One PR = one commit** on main (clean history)
+- Delete branch after merge
+- No force push to `main`
+- No merge commits unless multi-PR feature (rare)
+
+## Release Tagging
+
+```
+v<MAJOR>.<MINOR>.<PATCH>
+```
+
+| Bump | When |
+|------|------|
+| MAJOR | Breaking API or data model |
+| MINOR | New features, backward compatible |
+| PATCH | Bug fixes only |
+
+**Release steps:**
+1. Update `RELEASE_NOTES.md`
+2. Merge all PRs to `main`
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. Deploy backend (Render auto) + frontend (Vercel auto)
+5. Run `prisma migrate deploy` if schema changed
+6. Verify `/api/health`
+
+## What NOT to Do
+
+- Force push to `main`
+- Commit directly to `main` (use branches)
+- Combine unrelated changes in one PR
+- Skip hooks (`--no-verify`) unless explicitly needed
+- Commit `.env`, credentials, or secrets
+- Amend pushed commits
+- Update git config
+
+## Documentation Updates in PRs
+
+| File | When Required |
+|------|---------------|
+| `TIME_LOG.md` | Every PR |
+| `FEATURE_BACKLOG.md` | Feature/fix PRs |
+| `DECISION_LOG.md` | Architectural changes |
+| `API_CONTRACTS.md` | API changes |
+| `KNOWN_ISSUES.md` | Bug fixes (remove/mark resolved) |
+| `RELEASE_NOTES.md` | Release PRs |
